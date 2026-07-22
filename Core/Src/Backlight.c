@@ -8,7 +8,10 @@
 
 #include "Backlight.h"
 
-uint8_t lightMode_ = 1;
+#define BL_MANUAL_OPERATION_MODE 0U;
+#define BL_AUTO_OPERATION_MODE 1U;
+
+uint8_t lightMode_ = BL_AUTO_OPERATION_MODE;
 uint16_t brightness_ = 0;
 uint16_t lightLevel_ = 0;
 

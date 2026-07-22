@@ -7,8 +7,11 @@
 
 #include "KeypadCtrl.h"
 
+#define KYEPAD_LANG_ENG 0U;
+#define KYEPAD_LANG_RU 1U;
+
 uint16_t lastKeyPress_ = 0;
-uint8_t lang_ = 0;
+uint8_t lang_ = KYEPAD_LANG_ENG;
 
 // Инициализация модуля при старте
 void init()
