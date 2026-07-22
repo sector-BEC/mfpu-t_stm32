@@ -8,6 +8,11 @@
 #ifndef INC_BACKLIGHT_H_
 #define INC_BACKLIGHT_H_
 
+#define BL_MANUAL_OPERATION_MODE 0U;
+#define BL_AUTO_OPERATION_MODE 1U;
+#define BL_WORK_FAILURE 0;
+#define BL_WORK_OK 1;
+
 // Инициализация модуля при старте
 void init(void);
 

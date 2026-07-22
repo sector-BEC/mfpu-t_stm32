@@ -8,9 +8,6 @@
 
 #include "Backlight.h"
 
-#define BL_MANUAL_OPERATION_MODE 0U;
-#define BL_AUTO_OPERATION_MODE 1U;
-
 uint8_t lightMode_ = BL_AUTO_OPERATION_MODE;
 uint16_t brightness_ = 0;
 uint16_t lightLevel_ = 0;
@@ -24,7 +21,7 @@ void init()
 // Текущий признак исправности
 uint8_t getOperability()
 {
-	return 1;
+	return BL_WORK_OK;
 }
 
 // Выполнение регулярных задач модуля

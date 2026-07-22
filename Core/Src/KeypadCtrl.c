@@ -7,9 +7,6 @@
 
 #include "KeypadCtrl.h"
 
-#define KYEPAD_LANG_ENG 0U;
-#define KYEPAD_LANG_RU 1U;
-
 uint16_t lastKeyPress_ = 0;
 uint8_t lang_ = KYEPAD_LANG_ENG;
 
@@ -22,7 +19,7 @@ void init()
 // Текущий признак исправности
 uint8_t getOperability()
 {
-	return 1;
+	return KEYPAD_WORK_OK;
 }
 
 
