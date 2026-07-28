@@ -30,7 +30,7 @@ void update()
 	//
 }
 
-// Режим яркости подсветки
+// Режим работы подсветки
 uint8_t getMode()
 {
 	return lightMode_;
@@ -51,8 +51,8 @@ uint16_t getLightLevel()
 // Установить режим подсветки
 void setMode(uint8_t mode)
 {
-	if(mode_ != mode)
+	if(lightMode_ != mode)
 	{
-		mode_ = mode;
+		lightMode_ = mode;
 	}
 }

@@ -13,6 +13,8 @@
 #define KEYPAD_WORK_FAILURE 0;
 #define KEYPAD_WORK_OK 1;
 
+#include <stdint.h>
+
 // Инициализация модуля при старте
 void init(void);
 
