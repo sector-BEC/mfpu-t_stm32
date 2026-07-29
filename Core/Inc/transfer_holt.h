@@ -1,9 +1,3 @@
-/*
- * transfer_holt.h
- *
- *  Created on: May 14, 2026
- *      Author: vbuser
- */
 
 /*
  * Сделано:
@@ -227,7 +221,7 @@ void TRANSFER_SetLoopback(uint8_t mask);
 void Init_Holt(SPI_HandleTypeDef *hspi,
 		GPIO_TypeDef *cs_port, uint16_t cs_pin,
         GPIO_TypeDef *mrst_port, uint16_t mrst_pin,
-        GPIO_TypeDef *run_port, uint16_t run_pin);;
+        GPIO_TypeDef *run_port, uint16_t run_pin);
 
 /*
  * Согласно datasheet holt hi-3220:

@@ -1,10 +1,3 @@
-/*
- * transfer_holt.c
- *
- *  Created on: May 14, 2026
- *      Author: vbuser
- */
-
 
 /*
  * Сделано:
