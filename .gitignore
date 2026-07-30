@@ -62,3 +62,24 @@ JLinkLog.txt
 *.log
 *.tmp
 *~
+
+# ==========================================
+# 6. Чтобы не ломалось
+# ==========================================
+Core/Src/eth.c
+Core/Inc/eth.h
+
+Core/Src/spi.c
+Core/Inc/spi.h
+
+Core/Src/usart.c
+Core/Inc/usart.h
+
+Core/Src/usb_otg.c
+Core/Inc/usb_otg.h
+
+Core/Src/gpio.c
+Core/Inc/gpio.h
+
+Core/Src/stm32*.c
+Core/Inc/stm32*.h
