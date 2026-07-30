@@ -16,24 +16,25 @@
 #include <stdint.h>
 
 // Инициализация модуля при старте
-void init(void);
+void BacklightInit(void);
 
 // Текущий признак исправности
-uint8_t getOperability(void);
+uint8_t BacklightGetOperability(void);
 
 // Выполнение регулярных задач модуля
-void update(void);
+void BacklightUpdate(void);
 
 // Режим яркости подсветки
-uint8_t getMode(void);
-
-// Текущая освещенность окружающей среды
-uint16_t getBrightness(void);
-
-// Текущий уровень освещенности окружающей среды
-uint16_t getLightLevel(void);
+uint8_t BacklightGetMode(void);
 
 // Установить режим подсветки
-void setMode(uint8_t lang);
+void BacklightSetMode(uint8_t lang);
+
+// Текущая освещенность окружающей среды
+uint16_t BacklightGetBrightness(void);
+
+// Текущий уровень освещенности окружающей среды
+uint16_t BacklightGetLightLevel(void);
+
 
 #endif /* INC_BACKLIGHT_H_ */

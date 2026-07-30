@@ -6,6 +6,7 @@
  */
 
 #include "KeypadCtrl.h"
+#include "stm32f4xx_hal.h"
 
 uint16_t lastKeyPress_ = 0;
 uint8_t lang_ = KEYPAD_LANG_ENG;
@@ -32,7 +33,7 @@ uint8_t message_KEY_UP[]		={0x24,	0x30,	0x31,	0x3A,	0x30,	0x33,	0x3A,	0x4B,	0x45
 //															$			0			1			:			0			3			:			K			E			Y			:		ASSCI		\n
 
 // Инициализация модуля при старте
-void init()
+void KeypadCtrlInit()
 {
 // I2C Okay?
 	HAL_I2C_IsDeviceReady(&hi2c2, (uint16_t)0x68, 1, 100);
@@ -50,14 +51,14 @@ void init()
 }
 
 // Текущий признак исправности
-uint8_t getOperability()
+uint8_t KeypadCtrlGetOperability()
 {
 	return KEYPAD_WORK_OK;
 }
 
 
 // Выполнение регулярных задач модуля
-void update()
+void KeypadCtrlUpdate()
 {
 	/******************************************************************************************/
 	/* Отработка нажатий кнопок TCA8418																												*/
@@ -87,7 +88,7 @@ void update()
 }
 
 // Последняя нажатая кнопка
-uint16_t getKey()
+uint16_t KeypadCtrlGetKey()
 {
 	uint16_t result = lastKeyPress_;
 	lastKeyPress_ = 0;
@@ -95,13 +96,13 @@ uint16_t getKey()
 }
 
 // Текущий язык ввода на клавиатуре
-uint8_t getLanguage()
+uint8_t KeypadCtrlGetLanguage()
 {
 	return lang_;
 }
 
 // Установить язык ввода на клавиатуре
-void setLanguage(uint8_t lang)
+void KeypadCtrlSetLanguage(uint8_t lang)
 {
 	if(lang_ != lang)
 	{

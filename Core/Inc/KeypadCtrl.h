@@ -16,21 +16,21 @@
 #include <stdint.h>
 
 // Инициализация модуля при старте
-void init(void);
+void KeypadCtrlInit(void);
 
 // Текущий признак исправности
-uint8_t getOperability(void);
+uint8_t KeypadCtrlGetOperability(void);
 
 // Выполнение регулярных задач модуля
-void update(void);
+void KeypadCtrlUpdate(void);
 
 // Последняя нажатая кнопка
-uint16_t getKey(void);
+uint16_t KeypadCtrlGetKey(void);
 
 // Текущий язык ввода на клавиатуре
-uint8_t getLanguage(void);
+uint8_t KeypadCtrlGetLanguage(void);
 
 // Установить язык ввода на клавиатуре
-void setLanguage(uint8_t lang);
+void KeypadCtrlSetLanguage(uint8_t lang);
 
 #endif /* INC_KEYPADCTRL_H_ */
