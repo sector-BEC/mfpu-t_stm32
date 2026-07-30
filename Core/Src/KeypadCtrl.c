@@ -6,12 +6,11 @@
  */
 
 #include "KeypadCtrl.h"
-#include "stm32f4xx_hal.h"
 
 uint16_t lastKeyPress_ = 0;
 uint8_t lang_ = KEYPAD_LANG_ENG;
 
-I2C_HandleTypeDef hi2c2;
+static I2C_HandleTypeDef* hi2c2;
 
 uint8_t intTCA8418	= 0;							// флаг прерывания от клавиатур
 uint8_t regValueKey = 0;
@@ -33,21 +32,22 @@ uint8_t message_KEY_UP[]		={0x24,	0x30,	0x31,	0x3A,	0x30,	0x33,	0x3A,	0x4B,	0x45
 //															$			0			1			:			0			3			:			K			E			Y			:		ASSCI		\n
 
 // Инициализация модуля при старте
-void KeypadCtrlInit()
+void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin)
 {
+	hi2c2 = hi2c2_origin;
 // I2C Okay?
-	HAL_I2C_IsDeviceReady(&hi2c2, (uint16_t)0x68, 1, 100);
+	HAL_I2C_IsDeviceReady(hi2c2, (uint16_t)0x68, 1, 100);
 // TCA8418 init
 	uint8_t TCA8418_COL7[2] = {0x1D, 0x3F};
-	HAL_I2C_Master_Transmit(&hi2c2, 0x68, TCA8418_COL7, sizeof(TCA8418_COL7), 1);
+	HAL_I2C_Master_Transmit(hi2c2, 0x68, TCA8418_COL7, sizeof(TCA8418_COL7), 1);
 	uint8_t TCA8418_COL9[2] = {0x1E, 0xFF};
-	HAL_I2C_Master_Transmit(&hi2c2, 0x68, TCA8418_COL9, sizeof(TCA8418_COL9), 1);
+	HAL_I2C_Master_Transmit(hi2c2, 0x68, TCA8418_COL9, sizeof(TCA8418_COL9), 1);
 	uint8_t TCA8418_ROW5[2] = {0x1F, 0x03};
-	HAL_I2C_Master_Transmit(&hi2c2, 0x68, TCA8418_ROW5, sizeof(TCA8418_ROW5), 1);
+	HAL_I2C_Master_Transmit(hi2c2, 0x68, TCA8418_ROW5, sizeof(TCA8418_ROW5), 1);
 	HAL_Delay(2);
 // enable interrup TCA8418
 	uint8_t outbuffer_4[2] = {0x01, 0x91};
-	HAL_I2C_Master_Transmit(&hi2c2, 0x68, outbuffer_4, sizeof(outbuffer_4), 1);
+	HAL_I2C_Master_Transmit(hi2c2, 0x68, outbuffer_4, sizeof(outbuffer_4), 1);
 }
 
 // Текущий признак исправности

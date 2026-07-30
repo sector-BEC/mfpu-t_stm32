@@ -14,9 +14,10 @@
 #define KEYPAD_WORK_OK 1;
 
 #include <stdint.h>
+#include "stm32f4xx_hal.h"
 
 // Инициализация модуля при старте
-void KeypadCtrlInit(void);
+void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin);
 
 // Текущий признак исправности
 uint8_t KeypadCtrlGetOperability(void);
