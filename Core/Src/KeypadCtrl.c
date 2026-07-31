@@ -65,8 +65,8 @@ void KeypadCtrlUpdate()
 	/******************************************************************************************/
 	if(intTCA8418 == 1)
 	{
-		HAL_I2C_Master_Transmit(&hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regAddresValueKEY, 1, 1);
-		HAL_I2C_Master_Receive(&hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regValueKey, 1, 1);
+		HAL_I2C_Master_Transmit(hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regAddresValueKEY, 1, 1);
+		HAL_I2C_Master_Receive(hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regValueKey, 1, 1);
 		uint8_t *ValueKey = &regValueKey;
 		if (*ValueKey != 0)
 		{
@@ -83,7 +83,7 @@ void KeypadCtrlUpdate()
 		}
 		intTCA8418=0;																											// сбросили флаг обработки прерывания
 		uint8_t clearInterrup[2] = {0x02, 0x1F};
-		HAL_I2C_Master_Transmit(&hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), clearInterrup, sizeof(clearInterrup), 1);
+		HAL_I2C_Master_Transmit(hi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), clearInterrup, sizeof(clearInterrup), 1);
 	}
 }
 

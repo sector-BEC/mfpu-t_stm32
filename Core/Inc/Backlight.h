@@ -8,10 +8,10 @@
 #ifndef INC_BACKLIGHT_H_
 #define INC_BACKLIGHT_H_
 
-#define BL_MANUAL_OPERATION_MODE 0U;
-#define BL_AUTO_OPERATION_MODE 1U;
-#define BL_WORK_FAILURE 0;
-#define BL_WORK_OK 1;
+#define BL_MANUAL_OPERATION_MODE 0U
+#define BL_AUTO_OPERATION_MODE 1U
+#define BL_WORK_FAILURE 0
+#define BL_WORK_OK 1
 
 #include <stdint.h>
 
@@ -30,11 +30,16 @@ uint8_t BacklightGetMode(void);
 // Установить режим подсветки
 void BacklightSetMode(uint8_t lang);
 
-// Текущая освещенность окружающей среды
+// Текущий уровень освещенности окружающей среды
 uint16_t BacklightGetBrightness(void);
 
-// Текущий уровень освещенности окружающей среды
+// Текущий уровень подсветки
 uint16_t BacklightGetLightLevel(void);
+
+void OnBacklightChangeLightLevel(uint16_t light);
+
+// Текущий уровень подсветки
+void BacklightSetLightLevel(uint16_t light);
 
 
 #endif /* INC_BACKLIGHT_H_ */

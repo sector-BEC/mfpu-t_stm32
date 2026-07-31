@@ -11,6 +11,7 @@
 uint8_t lightMode_ = BL_AUTO_OPERATION_MODE;
 uint16_t brightness_ = 0;
 uint16_t lightLevel_ = 0;
+uint16_t needLightLevel_ = 0;
 
 // Инициализация модуля при старте
 void BacklightInit()
@@ -51,9 +52,48 @@ uint16_t BacklightGetBrightness()
 	return brightness_;
 }
 
-// Текущий уровень освещенности окружающей среды
+// Текущий уровень подсветки
 uint16_t BacklightGetLightLevel()
 {
 	return lightLevel_;
+}
+
+void OnBacklightChangeLightLevel(uint16_t light)
+{
+	lightLevel_ = light;
+	//TIM->CCR = lightLevel_
+}
+
+void BacklightSetLightLevel(uint16_t light)
+{
+ 	if(needLightLevel_ != light)
+ 	{
+ 		needLightLevel_ = light;
+ 	}
+ 	if(lightMode_ == BL_AUTO_OPERATION_MODE)
+ 	{
+ 		if(lightLevel_ > needLightLevel_)
+ 		{
+ 			if(lightLevel_ + 100 > needLightLevel_)
+ 			{
+ 				OnBacklightChangeLightLevel(lightLevel_ + 100);
+ 			}
+ 			else
+ 			{
+ 				OnBacklightChangeLightLevel(needLightLevel_);
+ 			}
+ 		}
+ 		else if(lightLevel_ < needLightLevel_)
+ 		{
+ 			if(lightLevel_ - 100 < needLightLevel_)
+ 			{
+ 				OnBacklightChangeLightLevel(lightLevel_ - 100);
+ 			}
+ 			else
+ 			{
+ 				OnBacklightChangeLightLevel(needLightLevel_);
+ 			}
+ 		}
+ 	}
 }
 

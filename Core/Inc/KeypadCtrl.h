@@ -8,10 +8,10 @@
 #ifndef INC_KEYPADCTRL_H_
 #define INC_KEYPADCTRL_H_
 
-#define KEYPAD_LANG_ENG 0U;
-#define KEYPAD_LANG_RU 1U;
-#define KEYPAD_WORK_FAILURE 0;
-#define KEYPAD_WORK_OK 1;
+#define KEYPAD_LANG_ENG 0U
+#define KEYPAD_LANG_RU 1U
+#define KEYPAD_WORK_FAILURE 0U
+#define KEYPAD_WORK_OK 1U
 
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
