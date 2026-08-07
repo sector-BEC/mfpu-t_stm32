@@ -70,19 +70,19 @@ static void MX_SPI3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-//void SysTick_Handler(void)
-//{
-//    HAL_SysTick_IRQHandler();   // обслуживание HAL
-//    static uint8_t counter = 0;
-//    counter++;
-//
-//    flag_1ms = 1;  // Просто подняли флаг
-//
-//    if (counter >= 10) {
-//        counter = 0;
-//        flag_10ms = 1;
-//    }
-//}
+void SysTick_Handler(void)
+{
+    //HAL_SysTick_IRQHandler();   // обслуживание HAL
+    static uint8_t counter = 0;
+    counter++;
+
+    flag_1ms = 1;  // Просто подняли флаг
+
+    if (counter >= 10) {
+        counter = 0;
+        flag_10ms = 1;
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -138,11 +138,11 @@ int main(void)
   while (1)
   {
     /* СЛОТ 1: Критичный ввод (длительность не более 500 мкс) */
-    if (flag_1ms) {
-      flag_1ms = 0;
-      Logic_Tick1ms();   /* <-- добавлено: самопроверка/таймеры 1мс,
-                  *     здесь же должно быть сканирование клавиатуры */
-    }
+    // if (flag_1ms) {
+    //  flag_1ms = 0;
+    //  Logic_Tick1ms();   /* <-- добавлено: самопроверка/таймеры 1мс,
+    //              *     здесь же должно быть сканирование клавиатуры */
+    // }
 
     /* СЛОТ 2: Обмен по сети (детерминированная задержка) */
     if (flag_10ms) {

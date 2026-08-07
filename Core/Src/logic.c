@@ -96,7 +96,7 @@ typedef struct {
     uint32_t uptime_3min;    /* наработка, ед. = 3 мин, 18 бит (табл.14) */
 } MfpuState;
 
-static MfpuState st;
+static MfpuState mfpuState;
 
 /* ---------------------------------------------------------------------
  * Таймеры (обновляются: 1мс-поле -- в Logic_Tick1ms, 10мс-поля -- в
@@ -134,20 +134,20 @@ static int device_to_tx_channel(uint8_t device_id)
 
 static uint8_t active_line_to_tx_channel(void)
 {
-    return (st.active_line == LINE_ID_RIGHT) ? TX_CH_MFI_RIGHT : TX_CH_MFI_LEFT;
+    return (mfpuState.active_line == LINE_ID_RIGHT) ? TX_CH_MFI_RIGHT : TX_CH_MFI_LEFT;
 }
 
 static uint8_t active_line_to_recipient(void)
 {
-    return (st.active_line == LINE_ID_RIGHT) ? (uint8_t)ID_MFI_RIGHT : (uint8_t)ID_MFI_LEFT;
+    return (mfpuState.active_line == LINE_ID_RIGHT) ? (uint8_t)ID_MFI_RIGHT : (uint8_t)ID_MFI_LEFT;
 }
 
 /* Итоговая матрица состояния для всех исходящих слов, с учётом приоритета */
 static MatrixStatus current_matrix(void)
 {
-    bool fault    = (st.healthy == 0);
-    bool no_data  = (st.ready == 0);
-    bool testmode = (st.mode == OPMODE_TEST_CONTROL);
+    bool fault    = (mfpuState.healthy == 0);
+    bool no_data  = (mfpuState.ready == 0);
+    bool testmode = (mfpuState.mode == OPMODE_TEST_CONTROL);
     return ARINC_ResolveMatrix(fault, no_data, testmode);
 }
 
@@ -166,31 +166,31 @@ static void send_word(uint8_t tx_channel, const uint8_t word[4])
 
 static void handle_msg7(const uint8_t word[4])
 {
-    Msg7_KeyboardBacklight m;
-    bool ok = ARINC_ParseMsg7(word, &m);
+    Msg7_KeyboardBacklight message7;
+    bool ok = ARINC_ParseMsg7(word, &message7);
 
     /* Смена режима "работа"<->"тест-контроль" обрабатывается всегда,
      * даже находясь в тест-контроле (п.1.3.2: "выполняет обработку только
      * команды на изменение режима работы"). */
     if (ok) {
-        st.mode = m.test_control ? OPMODE_TEST_CONTROL : OPMODE_WORK;
+        mfpuState.mode = message7.test_control ? OPMODE_TEST_CONTROL : OPMODE_WORK;
     }
 
     /* Команда яркости подсветки -- только в режиме "работа" */
-    if (ok && st.mode == OPMODE_WORK) {
-        st.backlight_auto = m.auto_mode;
-        if (!st.backlight_auto) {
-            st.backlight_level = m.brightness;
+    if (ok && mfpuState.mode == OPMODE_WORK) {
+        mfpuState.backlight_auto = message7.auto_mode;
+        if (!mfpuState.backlight_auto) {
+            mfpuState.backlight_level = message7.brightness;
         }
         /* при backlight_auto==1 уровень подсветки вычисляется отдельным
          * алгоритмом по датчику освещённости -- не описан в ПИВ (TODO)
          * алгоритм Ивана45 вызвать тут*/
     }
 
-    int tx_ch = device_to_tx_channel(m.sender);
+    int tx_ch = device_to_tx_channel(message7.sender);
     if (tx_ch >= 0) {
         uint8_t ack[4];
-        ARINC_BuildMsg9(m.sender, (uint8_t)ID_MFPU,
+        ARINC_BuildMsg9(message7.sender, (uint8_t)ID_MFPU,
                          ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
         send_word((uint8_t)tx_ch, ack);
     }
@@ -198,18 +198,18 @@ static void handle_msg7(const uint8_t word[4])
 
 static void handle_msg8(const uint8_t word[4])
 {
-    Msg8_SelectLine m;
-    bool ok = ARINC_ParseMsg8(word, &m);
+    Msg8_SelectLine message8;
+    bool ok = ARINC_ParseMsg8(word, &message8);
 
     /* "Обработка сообщений №8 не выполняется в режиме тест-контроль" (п.1.3.2) */
-    if (ok && st.mode == OPMODE_WORK) {
-        st.active_line = m.active_line;
+    if (ok && mfpuState.mode == OPMODE_WORK) {
+        mfpuState.active_line = message8.active_line;
     }
 
-    int tx_ch = device_to_tx_channel(m.sender);
+    int tx_ch = device_to_tx_channel(message8.sender);
     if (tx_ch >= 0) {
         uint8_t ack[4];
-        ARINC_BuildMsg9(m.sender, (uint8_t)ID_MFPU,
+        ARINC_BuildMsg9(message8.sender, (uint8_t)ID_MFPU,
                          ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
         send_word((uint8_t)tx_ch, ack);
     }
@@ -217,11 +217,11 @@ static void handle_msg8(const uint8_t word[4])
 
 static void handle_msg9(const uint8_t word[4])
 {
-    Msg9_Ack m;
-    if (!ARINC_ParseMsg9(word, &m)) return; /* некорректный формат -- игнор */
+    Msg9_Ack message9;
+    if (!ARINC_ParseMsg9(word, &message9)) return; /* некорректный формат -- игнор */
     if (!pending_ack.pending) return;       /* мы ничего не ждём -- игнор */
 
-    int from_ch = device_to_tx_channel(m.sender);
+    int from_ch = device_to_tx_channel(message9.sender);
     if (from_ch != (int)pending_ack.tx_channel) return; /* ack не от того МФИ */
 
     /* И успех, и ошибка формата снимают наше ожидание: повторная отправка
@@ -304,32 +304,32 @@ static void process_retry(uint32_t elapsed_ms)
 static void send_next_broadcast_word(void)
 {
     uint8_t word[4];
-    bool test_mode = (st.mode == OPMODE_TEST_CONTROL);
+    bool test_mode = (mfpuState.mode == OPMODE_TEST_CONTROL);
 
     /* msg3 */
-    ARINC_BuildMsg3(st.layout_rus, st.backlight_auto, st.backlight_level,
-                                 st.illum_level, current_matrix(), word);
+    ARINC_BuildMsg3(mfpuState.layout_rus, mfpuState.backlight_auto, mfpuState.backlight_level,
+                                 mfpuState.illum_level, current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
     /* msg5 */
-    ARINC_BuildMsg5(st.uptime_3min, current_matrix(), word);
+    ARINC_BuildMsg5(mfpuState.uptime_3min, current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
     /* msg6 */
-    ARINC_BuildMsg6(st.sw_checksum, current_matrix(), word);
+    ARINC_BuildMsg6(mfpuState.sw_checksum, current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
     /* msg4 или msg10 */
     if (test_mode)
     {
-		ARINC_BuildMsg10(st.ready, st.healthy, 1u, st.sw_version, st.active_line,
-						  st.backlight_ctrl_ok, st.keypad_ctrl_ok, st.illum_sensor_ok,
+		ARINC_BuildMsg10(mfpuState.ready, mfpuState.healthy, 1u, mfpuState.sw_version, mfpuState.active_line,
+						  mfpuState.backlight_ctrl_ok, mfpuState.keypad_ctrl_ok, mfpuState.illum_sensor_ok,
 						  current_matrix(), word);
 	} else {
-		ARINC_BuildMsg4(st.ready, st.healthy, 0u, st.sw_version, st.active_line,
+		ARINC_BuildMsg4(mfpuState.ready, mfpuState.healthy, 0u, mfpuState.sw_version, mfpuState.active_line,
 						 current_matrix(), word);
 	}
     send_word(TX_CH_MFI_LEFT, word);
@@ -349,20 +349,20 @@ void Logic_Init(void)
     memset(&rx_queue, 0, sizeof(rx_queue));
     memset(&tx_queue, 0, sizeof(tx_queue));
     memset(&pending_ack, 0, sizeof(pending_ack));
-    memset(&st, 0, sizeof(st));
+    memset(&mfpuState, 0, sizeof(mfpuState));
 
-    st.mode        = OPMODE_WORK;
-    st.ready       = 0;  /* поднимется по завершении самопроверки */
-    st.healthy     = 0;
-    st.sw_version  = 1;  /* TODO: подставить реальный номер версии ПО */
-    st.sw_checksum = 0;  /* TODO: CRC-16-CCITT образа прошивки (константа
+    mfpuState.mode        = OPMODE_WORK;
+    mfpuState.ready       = 0;  /* поднимется по завершении самопроверки */
+    mfpuState.healthy     = 0;
+    mfpuState.sw_version  = 1;  /* TODO: подставить реальный номер версии ПО */
+    mfpuState.sw_checksum = 0;  /* TODO: CRC-16-CCITT образа прошивки (константа
                           * сборки либо расчёт по флеш-región при старте) */
-    st.active_line = LINE_ID_LEFT; /* "при подаче питания -- взаимодействие
+    mfpuState.active_line = LINE_ID_LEFT; /* "при подаче питания -- взаимодействие
                                      * с левым МФИ-12Т по ЛС1" (п.1) */
 
-    st.backlight_ctrl_ok = 1;
-    st.keypad_ctrl_ok    = 1;
-    st.illum_sensor_ok   = 1;
+    mfpuState.backlight_ctrl_ok = 1;
+    mfpuState.keypad_ctrl_ok    = 1;
+    mfpuState.illum_sensor_ok   = 1;
 
     selftest_timer_ms  = 0;
     broadcast_timer_ms = 0;
@@ -376,18 +376,19 @@ void Logic_Init(void)
      * Каналы 0/1/2 используются как ЛС1/ЛС2/ЛС3 (Rx) и ЛС4/ЛС5/ЛС6 (Tx). */
 }
 
+/*
 void Logic_Tick1ms(void)
 {
     /* Самопроверка при включении: длится не более 15с, пока не завершится
      * ready=0 (значит и признак готовности в сообщении №4/10 -- "0"). */
-    if (!st.ready) {
+    if (!mfpuState.ready) {
         selftest_timer_ms++;
         if (selftest_timer_ms >= SELFTEST_MS) {
             /* TODO: заменить на реальную проверку CRC ПО (сравнение с
              * sw_checksum) и опрос исправности узлов (подсветка,
              * контроллер клавиатуры, датчик освещённости). */
-            st.healthy = 1;
-            st.ready   = 1;
+            mfpuState.healthy = 1;
+            mfpuState.ready   = 1;
         }
     }
 
@@ -396,6 +397,7 @@ void Logic_Tick1ms(void)
      * При обнаружении события вызывать Logic_KeyEvent(code, pressed).
      * HI-3220 передаёт только уже сформированные ARINC-слова. */
 }
+*/
 
 void Logic_Process(void)
 {
@@ -413,7 +415,7 @@ void Logic_Process(void)
     process_retry(PROC_PERIOD_MS);
 
     /* 4. Периодическая рассылка: 5Гц ("работа") / 10Гц ("тест-контроль") */
-    uint32_t period = (st.mode == OPMODE_TEST_CONTROL) ? TEST_BROADCAST_MS
+    uint32_t period = (mfpuState.mode == OPMODE_TEST_CONTROL) ? TEST_BROADCAST_MS
                                                           : WORK_BROADCAST_MS;
     broadcast_timer_ms += PROC_PERIOD_MS;
     if (broadcast_timer_ms >= period) {
@@ -425,8 +427,8 @@ void Logic_Process(void)
     uptime_accum_ms += PROC_PERIOD_MS;
     if (uptime_accum_ms >= UPTIME_UNIT_MS) {
         uptime_accum_ms -= UPTIME_UNIT_MS;
-        if (st.uptime_3min < 0x3FFFFu) {
-            st.uptime_3min++;
+        if (mfpuState.uptime_3min < 0x3FFFFu) {
+            mfpuState.uptime_3min++;
         }
     }
 
