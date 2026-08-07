@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 // Инициализация модуля при старте
-void BacklightInit(void);
+void BacklightInit(TIM_HandleTypeDef* htim3, I2C_HandleTypeDef* hi2c2);
 
 // Текущий признак исправности
 uint8_t BacklightGetOperability(void);
