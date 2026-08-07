@@ -15,7 +15,7 @@ uint16_t brightness_ = 0;
 uint16_t lightLevel_ = 0;
 uint16_t needLightLevel_ = 0;
 TIM_HandleTypeDef* lightTimer;
-I2C_HandleTypeDef* backLightHi2c2;
+I2C_HandleTypeDef* backlightHi2c2;
 
 //light
 //uint8_t P0[2] = {0X01, 0x00};
@@ -60,14 +60,14 @@ uint8_t B6_G[2] = {0X30, 0x00};
 
 // Возвращает 1 если датчик отвечает, 0 если нет
 uint8_t BH1780_CheckPresence(void) {
-	return (HAL_I2C_IsDeviceReady(&backLightHi2c2, BH1780_ADDR_WRITE, 2, 100) == HAL_OK);
+	return (HAL_I2C_IsDeviceReady(backlightHi2c2, BH1780_ADDR_WRITE, 2, 100) == HAL_OK);
 }
 
 // Инициализация модуля при старте
 void BacklightInit(I2C_HandleTypeDef* hi2c2, TIM_HandleTypeDef* htim3)
 {
 	//hi2c
-	backLightHi2c2 = hi2c;
+	backlightHi2c2 = hi2c2;
 	if(BH1780_CheckPresence() > 0)
 	{
 		lightWork_ = BL_WORK_OK;
@@ -78,7 +78,7 @@ void BacklightInit(I2C_HandleTypeDef* hi2c2, TIM_HandleTypeDef* htim3)
 	HAL_TIM_PWM_Start_IT(lightTimer, TIM_CHANNEL_1);
 
 	PCF8575_Init(0x40, 100);
-	PCF8575_Reset(&hi2c3);
+	PCF8575_Reset(backlightHi2c2);
 
 }
 
@@ -93,6 +93,7 @@ void BacklightUpdate()
 {
 	if(lightMode_ == BL_AUTO_OPERATION_MODE)
 	{
+		// Получение значения освещенности окружающей среды
 		//HAL_ADC_Start(&hadc1); // Запуск
 		if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) { // Ожидание (таймаут 10мс)
 			brightness_ = HAL_ADC_GetValue(&hadc1); // Считываем результат
@@ -154,7 +155,7 @@ void OnBacklightChangeLightLevel(uint16_t light)
 {
 	TIM1->CCR1 = light;
 	HAL_Delay(100);
-	PCF8575_write(&hi2c3, B1_W);
+	PCF8575_write(backlightHi2c2, B1_W);
 }
 
 void BacklightSetLightLevel(uint16_t light)

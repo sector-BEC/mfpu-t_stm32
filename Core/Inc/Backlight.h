@@ -13,10 +13,13 @@
 #define BL_WORK_FAILURE 0
 #define BL_WORK_OK 1
 
+#define BH1780_ADDR_WRITE 0U
+
 #include <stdint.h>
+#include "stm32f4xx_hal.h"
 
 // Инициализация модуля при старте
-void BacklightInit(TIM_HandleTypeDef* htim3, I2C_HandleTypeDef* hi2c2);
+void BacklightInit(I2C_HandleTypeDef* hi2c2, TIM_HandleTypeDef* htim3);
 
 // Текущий признак исправности
 uint8_t BacklightGetOperability(void);
