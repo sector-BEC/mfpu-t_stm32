@@ -37,15 +37,15 @@
 
 /* ---------- Адреса сообщений (Label, десятичный, табл.4-22) ---------- */
 #define ADDR_MSG1   188U  /* код нажатой клавиши (МФПУ-Т -> МФИ) */
-#define ADDR_MSG2   189U  /* код отжатой клавиши (МФПУ-Т -> МФИ) */
-#define ADDR_MSG3   190U  /* раскладка/подсветка/освещённость (broadcast) */
-#define ADDR_MSG4   191U  /* статус МФПУ-Т, версия ПО, активная линия (broadcast, режим "работа") */
-#define ADDR_MSG5   192U  /* наработка (broadcast) */
-#define ADDR_MSG6   193U  /* контрольная сумма ПО (broadcast) */
-#define ADDR_MSG7   194U  /* команда управления подсветкой (входящее) */
-#define ADDR_MSG8   195U  /* команда выбора активной линии (входящее, от ПУИ-Т) */
-#define ADDR_MSG9   196U  /* подтверждение приёма (в обе стороны) */
-#define ADDR_MSG10  197U  /* статус МФПУ-Т (broadcast, режим "тест-контроль") */
+// #define ADDR_MSG2   189U  /* код отжатой клавиши (МФПУ-Т -> МФИ) */
+#define ADDR_MSG2   190U  /* раскладка/подсветка/освещённость (broadcast) */
+#define ADDR_MSG3   191U  /* статус МФПУ-Т, версия ПО, активная линия (broadcast, режим "работа") */
+#define ADDR_MSG4   192U  /* наработка (broadcast) */
+#define ADDR_MSG5   193U  /* контрольная сумма ПО (broadcast) */
+#define ADDR_MSG6   194U  /* команда управления подсветкой (входящее) */
+#define ADDR_MSG7   195U  /* команда выбора активной линии (входящее, от ПУИ-Т) */
+#define ADDR_MSG8   196U  /* подтверждение приёма (в обе стороны) */
+#define ADDR_MSG9   197U  /* статус МФПУ-Т (broadcast, режим "тест-контроль") */
 
 /* ---------- Идентификаторы КИ БРЭО (табл.2) ---------- */
 typedef enum {
@@ -64,13 +64,13 @@ typedef enum {
     MATRIX_NORMAL  = 0x3  /* 11 - нормальная работа (низший приоритет) */
 } MatrixStatus;
 
-/* ---------- Идентификаторы линии связи с МФИ (табл.13), в 2 битах ---------- */
+/* ---------- Идентификаторы линии связи с МФИ (табл.12), в 2 битах ---------- */
 typedef enum {
     LINE_ID_LEFT  = 0x1, /* 01 - ЛС1, левый МФИ-12Т */
     LINE_ID_RIGHT = 0x2  /* 10 - ЛС2, правый МФИ-12Т */
 } LineId;
 
-/* ---------- Статус передачи сообщения №9 (табл.19), в 2 битах ---------- */
+/* ---------- Статус передачи сообщения №8 (табл.18), в 2 битах ---------- */
 typedef enum {
     XFER_OK    = 0x1, /* 01 - успешная передача */
     XFER_ERROR = 0x2  /* 10 - ошибка передачи */
@@ -101,35 +101,35 @@ MatrixStatus ARINC_ResolveMatrix(bool fault, bool no_computed_data, bool test_mo
  * Сборщики исходящих сообщений (МФПУ-Т -> КИ БРЭО)
  * ===================================================================== */
 
-/* Сообщение №1/№2: код клавиши. is_release=false -> msg1 (нажатие),
- * true -> msg2 (отжатие). recipient - ID_MFI_LEFT или ID_MFI_RIGHT. */
-void ARINC_BuildKeyMsg(bool is_release, uint8_t recipient, uint8_t key_code,
+/* Сообщение №1: код клавиши. msg1 (нажатие),
+ * recipient - ID_MFI_LEFT или ID_MFI_RIGHT. */
+void ARINC_BuildKeyMsg(uint8_t recipient, uint8_t key_code,
                         MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №3: раскладка клавиатуры, режим/уровень подсветки, освещённость.
+/* Сообщение №2: раскладка клавиатуры, режим/уровень подсветки, освещённость.
  * Всегда broadcast (id=7). */
-void ARINC_BuildMsg3(uint8_t layout_rus, uint8_t backlight_auto,
+void ARINC_BuildMsg2(uint8_t layout_rus, uint8_t backlight_auto,
                       uint8_t backlight_level, uint8_t illum_level,
                       MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №4: статус МФПУ-Т в режиме "работа". Broadcast. */
-void ARINC_BuildMsg4(uint8_t ready, uint8_t healthy, uint8_t test_mode,
+/* Сообщение №3: статус МФПУ-Т в режиме "работа". Broadcast. */
+void ARINC_BuildMsg3(uint8_t ready, uint8_t healthy, uint8_t test_mode,
                       uint8_t sw_version, LineId active_line,
                       MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №5: наработка (18-бит счётчик, единица - 3 мин). Broadcast. */
-void ARINC_BuildMsg5(uint32_t uptime_3min, MatrixStatus matrix, uint8_t out[4]);
+/* Сообщение №4: наработка (18-бит счётчик, единица - 3 мин). Broadcast. */
+void ARINC_BuildMsg4(uint32_t uptime_3min, MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №6: контрольная сумма ПО (CRC-16-CCITT). Broadcast. */
-void ARINC_BuildMsg6(uint16_t crc16, MatrixStatus matrix, uint8_t out[4]);
+/* Сообщение №5: контрольная сумма ПО (CRC-16-CCITT). Broadcast. */
+void ARINC_BuildMsg5(uint16_t crc16, MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №9: подтверждение приёма. recipient - кому шлём ответ,
+/* Сообщение №8: подтверждение приёма. recipient - кому шлём ответ,
  * sender - наш ID (обычно ID_MFPU). */
-void ARINC_BuildMsg9(uint8_t recipient, uint8_t sender, XferStatus status,
+void ARINC_BuildMsg8(uint8_t recipient, uint8_t sender, XferStatus status,
                       MatrixStatus matrix, uint8_t out[4]);
 
-/* Сообщение №10: статус МФПУ-Т в режиме "тест-контроль". Broadcast. */
-void ARINC_BuildMsg10(uint8_t ready, uint8_t healthy, uint8_t test_mode,
+/* Сообщение №9: статус МФПУ-Т в режиме "тест-контроль". Broadcast. */
+void ARINC_BuildMsg9(uint8_t ready, uint8_t healthy, uint8_t test_mode,
                        uint8_t sw_version, LineId active_line,
                        uint8_t backlight_ok, uint8_t keypad_ok, uint8_t illum_ok,
                        MatrixStatus matrix, uint8_t out[4]);
@@ -145,26 +145,26 @@ typedef struct {
     uint8_t brightness;      /* 0..255, используется только если auto_mode==0 */
     uint8_t test_control;    /* 0-работа,1-тест-контроль */
     MatrixStatus matrix;
-} Msg7_KeyboardBacklight;
+} Msg6_KeyboardBacklight;
 
 typedef struct {
     uint8_t recipient;
     uint8_t sender;
     LineId  active_line;
     MatrixStatus matrix;
-} Msg8_SelectLine;
+} Msg7_SelectLine;
 
 typedef struct {
     uint8_t recipient;
     uint8_t sender;
     XferStatus status;
     MatrixStatus matrix;
-} Msg9_Ack;
+} Msg8_Ack;
 
 /* Возвращают false, если структура сообщения некорректна (для msg7/msg8:
  * зарезервированные поля не равны 0 -> формируется ошибка по протоколу). */
-bool ARINC_ParseMsg7(const uint8_t word[4], Msg7_KeyboardBacklight *out);
-bool ARINC_ParseMsg8(const uint8_t word[4], Msg8_SelectLine *out);
-bool ARINC_ParseMsg9(const uint8_t word[4], Msg9_Ack *out);
+bool ARINC_ParseMsg6(const uint8_t word[4], Msg6_KeyboardBacklight *out);
+bool ARINC_ParseMsg7(const uint8_t word[4], Msg7_SelectLine *out);
+bool ARINC_ParseMsg8(const uint8_t word[4], Msg8_Ack *out);
 
 #endif /* INC_ARINC_WORDS_H_ */
