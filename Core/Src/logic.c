@@ -2,6 +2,7 @@
 #include "transfer_holt.h"
 #include "arinc_words.h"
 #include <string.h>
+#include "Backlight.h"
 
 /* =====================================================================
  * Маппинг линий связи ЛС1-6 (см. п.1 ПИВ) на каналы HI-3220.
@@ -178,10 +179,12 @@ static void handle_msg6(const uint8_t word[4])
 
     /* Команда яркости подсветки -- только в режиме "работа" */
     if (ok && mfpuState.mode == OPMODE_WORK) {
-        mfpuState.backlight_auto = message6.auto_mode;
-        if (!mfpuState.backlight_auto) {
-            mfpuState.backlight_level = message6.brightness;
-        }
+		BacklightSetMode(message6.auto_mode);
+        if (message6.auto_mode != BL_AUTO_OPERATION_MODE) {
+			BacklightSetLightLevel(message6.brightness);
+        } else {
+			//Нет необходимости
+		}
         /* при backlight_auto==1 уровень подсветки вычисляется отдельным
          * алгоритмом по датчику освещённости -- не описан в ПИВ (TODO)
          * алгоритм Ивана45 вызвать тут*/
