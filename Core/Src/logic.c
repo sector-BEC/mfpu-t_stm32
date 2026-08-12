@@ -25,6 +25,7 @@
 #define RETRY_MAX_COUNT     5u      /* не более 5 повторов (п.1.2.4) */
 #define UPTIME_UNIT_MS      180000u /* 1 единица наработки = 3 мин (табл.13) */
 #define PROC_PERIOD_MS      10u     /* Logic_Process вызывается каждые 10мс */
+#define UPTIME_MAX_UNITS    0x3FFFFu /* максимальное время наработки = 262143 * 3 = 786429 минут = 13107.15 часов*/
 
 typedef enum { OPMODE_WORK = 0, OPMODE_TEST_CONTROL = 1 } OpMode;
 
@@ -174,7 +175,11 @@ static void handle_msg6(const uint8_t word[4])
      * даже находясь в тест-контроле (п.1.3.2: "выполняет обработку только
      * команды на изменение режима работы"). */
     if (ok) {
-        mfpuState.mode = message6.test_control ? OPMODE_TEST_CONTROL : OPMODE_WORK;
+        if (message6.test_control) {
+            mfpuState.mode = OPMODE_TEST_CONTROL;
+        } else {
+            mfpuState.mode = OPMODE_WORK;
+        }
     }
 
     /* Команда яркости подсветки -- только в режиме "работа" */
@@ -187,14 +192,18 @@ static void handle_msg6(const uint8_t word[4])
 		}
         /* при backlight_auto==1 уровень подсветки вычисляется отдельным
          * алгоритмом по датчику освещённости -- не описан в ПИВ (TODO)
-         * алгоритм Ивана45 вызвать тут*/
+         * вызывать алгоритм Ивана45 каждый раз при вызове Logic_Process, если автоподсветка == 1*/
     }
 
     int tx_ch = device_to_tx_channel(message6.sender);
     if (tx_ch >= 0) {
         uint8_t ack[4];
-        ARINC_BuildMsg8(message6.sender, (uint8_t)ID_MFPU,
-                         ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
+        if (ok)
+        {
+            ARINC_BuildMsg8(message6.sender, (uint8_t)ID_MFPU, XFER_OK, current_matrix(), ack);    
+        } else {
+            ARINC_BuildMsg8(message6.sender, (uint8_t)ID_MFPU, XFER_ERROR, current_matrix(), ack);
+        }
         send_word((uint8_t)tx_ch, ack);
     }
 }
@@ -296,6 +305,22 @@ static void process_retry(uint32_t elapsed_ms)
     pending_ack.retry_timer_ms = RETRY_INTERVAL_MS;
 }
 
+/* Учёт времени наработки МФПУ*/
+static void accumulate_uptime(void)
+{
+    /*
+    Каждые 3 минуты значиене uptime_3min увеличивается на единицу.
+    Согласно табл. 13 максимальное значение - 262143, что соответствует 0x3FFFF, в часах 13000+
+    */
+    uptime_accum_ms += PROC_PERIOD_MS;
+    if (uptime_accum_ms >= UPTIME_UNIT_MS) {
+        uptime_accum_ms -= UPTIME_UNIT_MS;
+        if (mfpuState.uptime_3min < UPTIME_MAX_UNITS) {
+            mfpuState.uptime_3min++;
+        }
+    }
+}
+
 /* =====================================================================
  * Периодическая широковещательная рассылка
  * (msg2,4,5,3 -- режим "работа" 5Гц; msg2,4,5,9 -- "тест-контроль" 10Гц)
@@ -307,6 +332,8 @@ static void send_next_broadcast_word(void)
 {
     uint8_t word[4];
     bool test_mode = (mfpuState.mode == OPMODE_TEST_CONTROL);
+
+    // TODO: взять у Ивана45: раскладку клавиатуры (layout), режим управления яркости (backlight_auto) и яркость подсветки (backlight_level), уровень освещённости датчика (illum_level)
 
     /* msg2 */
     ARINC_BuildMsg2(mfpuState.layout_rus, mfpuState.backlight_auto, mfpuState.backlight_level,
@@ -413,7 +440,7 @@ void Logic_Process(void)
         dispatch_incoming(ch, word);
     }
 
-    /* 3. Повтор неподтверждённых сообщений №1/№2 */
+    /* 3. Повтор неподтверждённых сообщений №1 */
     process_retry(PROC_PERIOD_MS);
 
     /* 4. Периодическая рассылка: 5Гц ("работа") / 10Гц ("тест-контроль") */
@@ -426,13 +453,7 @@ void Logic_Process(void)
     }
 
     /* 5. Учёт наработки (единица -- 3 минуты, табл.14) */
-    uptime_accum_ms += PROC_PERIOD_MS;
-    if (uptime_accum_ms >= UPTIME_UNIT_MS) {
-        uptime_accum_ms -= UPTIME_UNIT_MS;
-        if (mfpuState.uptime_3min < 0x3FFFFu) {
-            mfpuState.uptime_3min++;
-        }
-    }
+    accumulate_uptime()
 
     /* 6. Реальная отправка накопленной исходящей очереди по SPI.
      *    Всё обращение к HI-3220 сосредоточено в этом детерминированном
