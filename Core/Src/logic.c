@@ -3,6 +3,7 @@
 #include "arinc_words.h"
 #include <string.h>
 #include "Backlight.h"
+#include "KeypadCtrl.h"
 
 /* =====================================================================
  * Маппинг линий связи ЛС1-6 (см. п.1 ПИВ) на каналы HI-3220.
@@ -85,17 +86,17 @@ typedef struct {
     LineId   active_line;    /* выбранная линия для msg1 (табл.12) */
 
     /* локальные данные для сообщения №2 */
-    uint8_t  layout_rus;
-    uint8_t  backlight_auto;
-    uint8_t  backlight_level;
-    uint8_t  illum_level;
+    // uint8_t  layout_rus;
+    // uint8_t  backlight_auto;
+    // uint8_t  backlight_level;
+    // uint8_t  illum_level;
 
     /* состояние компонентов для сообщения №9 (тест-контроль, табл.21) */
-    uint8_t  backlight_ctrl_ok;
-    uint8_t  keypad_ctrl_ok;
-    uint8_t  illum_sensor_ok;
+    // uint8_t  backlight_ctrl_ok;
+    // uint8_t  keypad_ctrl_ok;
+    // uint8_t  illum_sensor_ok;
 
-    uint32_t uptime_3min;    /* наработка, ед. = 3 мин, 18 бит (табл.13) */
+    // uint32_t uptime_3min;    /* наработка, ед. = 3 мин, 18 бит (табл.13) */
 } MfpuState;
 
 static MfpuState mfpuState;
@@ -309,15 +310,14 @@ static void process_retry(uint32_t elapsed_ms)
 static void accumulate_uptime(void)
 {
     /*
-    Каждые 3 минуты значиене uptime_3min увеличивается на единицу.
+    Каждые 3 минуты значиене GetWorkTimeSRAM() увеличивается на единицу.
     Согласно табл. 13 максимальное значение - 262143, что соответствует 0x3FFFF, в часах 13000+
     */
     uptime_accum_ms += PROC_PERIOD_MS;
     if (uptime_accum_ms >= UPTIME_UNIT_MS) {
         uptime_accum_ms -= UPTIME_UNIT_MS;
-        if (mfpuState.uptime_3min < UPTIME_MAX_UNITS) {
-            mfpuState.uptime_3min++;
-			SetWorkTimeSRAM(mfpuState.uptime_3min);
+        if (GetWorkTimeSRAM() < UPTIME_MAX_UNITS) {
+			SetWorkTimeSRAM(GetWorkTimeSRAM()++);
         }
     }
 }
@@ -337,13 +337,13 @@ static void send_next_broadcast_word(void)
     // TODO: взять у Ивана45: раскладку клавиатуры (layout), режим управления яркости (backlight_auto) и яркость подсветки (backlight_level), уровень освещённости датчика (illum_level)
 
     /* msg2 */
-    ARINC_BuildMsg2(mfpuState.layout_rus, mfpuState.backlight_auto, mfpuState.backlight_level,
-                                 mfpuState.illum_level, current_matrix(), word);
+    ARINC_BuildMsg2(KeypadCtrlGetLanguage(), BacklightGetMode(), BacklightGetLightLevel(),
+                                BacklightGetBrightness(), current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
     /* msg4 */
-    ARINC_BuildMsg4(mfpuState.uptime_3min, current_matrix(), word);
+    ARINC_BuildMsg4(GetWorkTimeSRAM(), current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
@@ -356,7 +356,7 @@ static void send_next_broadcast_word(void)
     if (test_mode)
     {
 		ARINC_BuildMsg9(mfpuState.ready, mfpuState.healthy, 1u, mfpuState.sw_version, mfpuState.active_line,
-						  mfpuState.backlight_ctrl_ok, mfpuState.keypad_ctrl_ok, mfpuState.illum_sensor_ok,
+						  BacklightGetOperability(), KeypadCtrlGetOperability(), BacklightGetOperability(),
 						  current_matrix(), word);
 	} else {
 		ARINC_BuildMsg3(mfpuState.ready, mfpuState.healthy, 0u, mfpuState.sw_version, mfpuState.active_line,
@@ -384,16 +384,11 @@ void Logic_Init(void)
     mfpuState.mode        = OPMODE_WORK;
     mfpuState.ready       = 0;  /* поднимется по завершении самопроверки */
     mfpuState.healthy     = 0;
-    mfpuState.sw_version  = 1;  /* TODO: подставить реальный номер версии ПО */
-    mfpuState.sw_checksum = 0;  /* TODO: CRC-16-CCITT образа прошивки (константа
+    mfpuState.sw_version  = GetSWVersion();  /* TODO: подставить реальный номер версии ПО */
+    mfpuState.sw_checksum = GetSWCheckSum();  /* TODO: CRC-16-CCITT образа прошивки (константа
                           * сборки либо расчёт по флеш-región при старте) */
     mfpuState.active_line = LINE_ID_LEFT; /* "при подаче питания -- взаимодействие
                                      * с левым МФИ-12Т по ЛС1" (п.1) */
-	mfpuState.uptime_3min = GetWorkTimeSRAM();
-
-    mfpuState.backlight_ctrl_ok = 1;
-    mfpuState.keypad_ctrl_ok    = 1;
-    mfpuState.illum_sensor_ok   = 1;
 
     selftest_timer_ms  = 0;
     broadcast_timer_ms = 0;

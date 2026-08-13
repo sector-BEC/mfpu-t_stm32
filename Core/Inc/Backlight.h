@@ -27,7 +27,7 @@ uint8_t BacklightGetOperability(void);
 // Выполнение регулярных задач модуля
 void BacklightUpdate(void);
 
-// Режим яркости подсветки
+// Режим подсветки
 uint8_t BacklightGetMode(void);
 
 // Установить режим подсветки
