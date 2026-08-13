@@ -317,6 +317,7 @@ static void accumulate_uptime(void)
         uptime_accum_ms -= UPTIME_UNIT_MS;
         if (mfpuState.uptime_3min < UPTIME_MAX_UNITS) {
             mfpuState.uptime_3min++;
+			SetWorkTimeSRAM(mfpuState.uptime_3min);
         }
     }
 }
@@ -388,6 +389,7 @@ void Logic_Init(void)
                           * сборки либо расчёт по флеш-región при старте) */
     mfpuState.active_line = LINE_ID_LEFT; /* "при подаче питания -- взаимодействие
                                      * с левым МФИ-12Т по ЛС1" (п.1) */
+	mfpuState.uptime_3min = GetWorkTimeSRAM();
 
     mfpuState.backlight_ctrl_ok = 1;
     mfpuState.keypad_ctrl_ok    = 1;
