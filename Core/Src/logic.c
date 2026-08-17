@@ -4,6 +4,7 @@
 #include <string.h>
 #include "Backlight.h"
 #include "KeypadCtrl.h"
+#include "SRAM.h"
 
 /* =====================================================================
  * Маппинг линий связи ЛС1-6 (см. п.1 ПИВ) на каналы HI-3220.
@@ -222,8 +223,8 @@ static void handle_msg7(const uint8_t word[4])
     int tx_ch = device_to_tx_channel(message7.sender);
     if (tx_ch >= 0) {
         uint8_t ack[4];
-        ARINC_BuildMsg7(message7.sender, (uint8_t)ID_MFPU,
-                         ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
+        // not found method!!!
+        //ARINC_BuildMsg7(message7.sender, (uint8_t)ID_MFPU, ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
         send_word((uint8_t)tx_ch, ack);
     }
 }
@@ -317,7 +318,7 @@ static void accumulate_uptime(void)
     if (uptime_accum_ms >= UPTIME_UNIT_MS) {
         uptime_accum_ms -= UPTIME_UNIT_MS;
         if (GetWorkTimeSRAM() < UPTIME_MAX_UNITS) {
-			SetWorkTimeSRAM(GetWorkTimeSRAM()++);
+			SetWorkTimeSRAM(GetWorkTimeSRAM()+1);
         }
     }
 }
@@ -406,13 +407,13 @@ void Logic_Init(void)
 void Logic_Tick1ms(void)
 {
     /* Самопроверка при включении: длится не более 15с, пока не завершится
-     * ready=0 (значит и признак готовности в сообщении №4/10 -- "0"). */
+     * ready=0 (значит и признак готовности в сообщении №4/10 -- "0"). *
     if (!mfpuState.ready) {
         selftest_timer_ms++;
         if (selftest_timer_ms >= SELFTEST_MS) {
             /* TODO: заменить на реальную проверку CRC ПО (сравнение с
              * sw_checksum) и опрос исправности узлов (подсветка,
-             * контроллер клавиатуры, датчик освещённости). */
+             * контроллер клавиатуры, датчик освещённости). *
             mfpuState.healthy = 1;
             mfpuState.ready   = 1;
         }
@@ -421,7 +422,7 @@ void Logic_Tick1ms(void)
     /* TODO: неблокирующее сканирование матрицы клавиатуры должно быть
      * здесь (короткий, детерминированный по времени слот, <=500мкс).
      * При обнаружении события вызывать Logic_KeyEvent(code).
-     * HI-3220 передаёт только уже сформированные ARINC-слова. */
+     * HI-3220 передаёт только уже сформированные ARINC-слова. *
 }
 */
 
@@ -450,14 +451,21 @@ void Logic_Process(void)
     }
 
     /* 5. Учёт наработки (единица -- 3 минуты, табл.14) */
-    accumulate_uptime()
+    accumulate_uptime();
 
     /* 6. Реальная отправка накопленной исходящей очереди по SPI.
      *    Всё обращение к HI-3220 сосредоточено в этом детерминированном
      *    по времени слоте (вызывается каждые 10мс из main.c). */
     uint8_t tx_ch, tx_word[4];
-    while (queue_pop(tx_queue.channel, tx_queue.word, &tx_queue.head, &tx_queue.tail,
-                     TX_QUEUE_SIZE, &tx_ch, tx_word)) {
+    while (
+    		queue_pop(tx_queue.channel,
+    				tx_queue.word,
+					&tx_queue.head,
+					&tx_queue.tail,
+					TX_QUEUE_SIZE,
+					&tx_ch,
+					tx_word))
+    {
         TRANSFER_SendImmediate(tx_ch, tx_word);
     }
 }

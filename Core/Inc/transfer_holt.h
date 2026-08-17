@@ -68,7 +68,8 @@
 #define INC_TRANSFER_HOLT_H_
 
 #include <stdint.h>
-#include "stm32f7xx_hal.h"    // подставить нужную серию
+//#include "stm32f7xx_hal.h"    // подставить нужную серию
+#include "stm32f4xx_hal.h"
 
 // ========== Адреса регистров HI-3220 ==========
 #define HI3220_MCR_WR        0x8000   // запись MCR

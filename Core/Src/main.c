@@ -23,6 +23,9 @@
 /* USER CODE BEGIN Includes */
 #include "transfer_holt.h"
 #include "logic.h"
+#include "KeypadCtrl.h"
+#include "Backlight.h"
+#include "lcd1602_i2c.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,7 +40,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+lcd1602_HandleTypeDef lcd1602_Handle;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -45,6 +48,7 @@ CAN_HandleTypeDef hcan2;
 
 CRC_HandleTypeDef hcrc;
 
+I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c2;
 
 SPI_HandleTypeDef hspi3;
@@ -64,25 +68,26 @@ static void MX_CAN2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_SPI3_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void SysTick_Handler(void)
-{
-    //HAL_SysTick_IRQHandler();   // обслуживание HAL
-    static uint8_t counter = 0;
-    counter++;
-
-    flag_1ms = 1;  // Просто подняли флаг
-
-    if (counter >= 10) {
-        counter = 0;
-        flag_10ms = 1;
-    }
-}
+//void SysTick_Handler(void)
+//{
+//    //HAL_SysTick_IRQHandler();   // обслуживание HAL
+//    static uint8_t counter = 0;
+//    counter++;
+//
+//    flag_1ms = 1;  // Просто подняли флаг
+//
+//    if (counter >= 10) {
+//        counter = 0;
+//        flag_10ms = 1;
+//    }
+//}
 /* USER CODE END 0 */
 
 /**
@@ -119,7 +124,14 @@ int main(void)
   MX_TIM3_Init();
   MX_I2C2_Init();
   MX_SPI3_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+  KeypadCtrlInit(&hi2c2);
+  BacklightInit(&hi2c2, &htim3, &lcd1602_Handle);
+
+  lcd1602_Init(&lcd1602_Handle, &hi2c1 , PCF8574_ADDRESS);
+
+  //lcd1602_Print(&lcd1602_Handle, (uint8_t*)"Wait 10 sec.");
 
   //  // Массив для отправки: команда 0x94 (канал 0) + 4 байта данных (например, 0x12,0x34,0x56,0x78)
   //  uint8_t spi_tx[5] = {0x94, 0x12, 0x34, 0x56, 0x78};
@@ -131,7 +143,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 
   // Инициализация холта
-  Init_Holt(&hspi3, GPIOB, GPIO_PIN_0, GPIOB, GPIO_PIN_1, GPIOC, GPIO_PIN_13);
+  //Init_Holt(&hspi3, GPIOB, GPIO_PIN_0, GPIOB, GPIO_PIN_1, GPIOC, GPIO_PIN_13);
 
   Logic_Init(); // подготовка для работы основной логики
 
@@ -149,6 +161,9 @@ int main(void)
       flag_10ms = 0;
       Logic_Process();  /* опрос FIFO, диспетчеризация, ретраи, рассылка */
     }
+
+    KeypadCtrlUpdate();
+	BacklightUpdate();
 
     /* USER CODE END WHILE */
 
@@ -263,6 +278,40 @@ static void MX_CRC_Init(void)
   /* USER CODE BEGIN CRC_Init 2 */
 
   /* USER CODE END CRC_Init 2 */
+
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
 
 }
 

@@ -17,9 +17,10 @@
 
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
+#include "lcd1602_i2c.h"
 
 // Инициализация модуля при старте
-void BacklightInit(I2C_HandleTypeDef* hi2c2, TIM_HandleTypeDef* htim3);
+void BacklightInit(I2C_HandleTypeDef* hi2c2, TIM_HandleTypeDef* htim3, lcd1602_HandleTypeDef* lcd1602_Handle);
 
 // Текущий признак исправности
 uint8_t BacklightGetOperability(void);
