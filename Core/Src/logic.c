@@ -223,8 +223,7 @@ static void handle_msg7(const uint8_t word[4])
     int tx_ch = device_to_tx_channel(message7.sender);
     if (tx_ch >= 0) {
         uint8_t ack[4];
-        // not found method!!!
-        //ARINC_BuildMsg7(message7.sender, (uint8_t)ID_MFPU, ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
+        ARINC_BuildMsg8(message7.sender, (uint8_t)ID_MFPU, ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
         send_word((uint8_t)tx_ch, ack);
     }
 }
@@ -336,6 +335,9 @@ static void send_next_broadcast_word(void)
     bool test_mode = (mfpuState.mode == OPMODE_TEST_CONTROL);
 
     // TODO: взять у Ивана45: раскладку клавиатуры (layout), режим управления яркости (backlight_auto) и яркость подсветки (backlight_level), уровень освещённости датчика (illum_level)
+
+    KeypadCtrlUpdate();
+	BacklightUpdate();
 
     /* msg2 */
     ARINC_BuildMsg2(KeypadCtrlGetLanguage(), BacklightGetMode(), BacklightGetLightLevel(),

@@ -20,7 +20,6 @@ lcd1602_HandleTypeDef* backlightLCD1602_Handle;
 
 // Адрес датчика (0x23 << 1 = 0x46), так как HAL требует 7-битный адрес со сдвигом влево
 #define BH1750_ADDR         0x46
-#define BH1750_ADDR2     	0x23
 // Команды датчика
 #define BH1750_POWER_ON     0x01
 #define BH1750_RESET        0x07
@@ -101,7 +100,7 @@ uint16_t BH1750_ReadLight(void) {
 
 // Возвращает 1 если датчик отвечает, 0 если нет
 uint8_t BH1780_CheckPresence(void) {
-	if (HAL_I2C_IsDeviceReady(backlightHi2c2, (BH1750_ADDR2 << 1), 2, 10) == HAL_OK)
+	if (HAL_I2C_IsDeviceReady(backlightHi2c2, (BH1750_ADDR >> 1), 2, 10) == HAL_OK)
 	{
 		lightWork_ = BL_WORK_OK;
 		return 1;

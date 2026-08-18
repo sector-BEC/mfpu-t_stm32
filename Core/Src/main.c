@@ -75,19 +75,19 @@ static void MX_I2C1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-//void SysTick_Handler(void)
-//{
-//    //HAL_SysTick_IRQHandler();   // обслуживание HAL
-//    static uint8_t counter = 0;
-//    counter++;
-//
-//    flag_1ms = 1;  // Просто подняли флаг
-//
-//    if (counter >= 10) {
-//        counter = 0;
-//        flag_10ms = 1;
-//    }
-//}
+void My_SysTick_Handler(void)
+{
+    //HAL_SysTick_IRQHandler();   // обслуживание HAL
+    static uint8_t counter = 0;
+    counter++;
+
+    flag_1ms = 1;  // Просто подняли флаг
+
+    if (counter >= 10) {
+        counter = 0;
+        flag_10ms = 1;
+    }
+}
 /* USER CODE END 0 */
 
 /**
