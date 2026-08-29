@@ -64,8 +64,8 @@
  * В Example 1 второе сообщение просто перезапишет первое. В Example 2 оба сообщения попадут в FIFO, и их оба можно обработать по порядку. FIFO даёт тот самый запас времени, чтобы не пропустить данные.
  */
 
-#ifndef INC_TRANSFER_HOLT_H_
-#define INC_TRANSFER_HOLT_H_
+#ifndef INC_DRIVERARINC_H_
+#define INC_DRIVERARINC_H_
 
 #include <stdint.h>
 //#include "stm32f7xx_hal.h"    // подставить нужную серию
@@ -183,41 +183,41 @@ typedef struct {
 
 // ========== Инициализация модуля ==========
 // Передаётся SPI, порт/пин CS, а также пины MRST и RUN (опционально)
-void TRANSFER_Init(SPI_HandleTypeDef *hspi,
+void DriverArinc_Init(SPI_HandleTypeDef *hspi,
                    GPIO_TypeDef *cs_port, uint16_t cs_pin,
                    GPIO_TypeDef *mrst_port, uint16_t mrst_pin,
                    GPIO_TypeDef *run_port, uint16_t run_pin);
 
 // Сброс и ожидание READY (блокирующий)
-void TRANSFER_ResetAndWait(void);
+void DriverArinc_ResetAndWait(void);
 
 // Глобальная конфигурация
-void TRANSFER_ConfigMaster(uint8_t enable_rx, uint8_t flip_labels, uint8_t enable_tx);
+void DriverArinc_ConfigMaster(uint8_t enable_rx, uint8_t flip_labels, uint8_t enable_tx);
 
 // Конфигурация каналов
-void TRANSFER_ConfigRxChannel(uint8_t channel, const HI3220_RxConfig *cfg);
-void TRANSFER_ConfigTxChannel(uint8_t channel, const HI3220_TxConfig *cfg);
+void DriverArinc_ConfigRxChannel(uint8_t channel, const HI3220_RxConfig *cfg);
+void DriverArinc_ConfigTxChannel(uint8_t channel, const HI3220_TxConfig *cfg);
 
 // Установка порога FIFO для конкретного канала (0..15). Порог FIFO (0..31).
-void TRANSFER_SetFifoThreshold(uint8_t channel, uint8_t threshold);
+void DriverArinc_SetFifoThreshold(uint8_t channel, uint8_t threshold);
 
 // Запуск/останов приёма-передачи (глобальный вход RUN)
-void TRANSFER_Start(void);
-void TRANSFER_Stop(void);
+void DriverArinc_Start(void);
+void DriverArinc_Stop(void);
 
-void TRANSFER_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t max_read);
+void DriverArinc_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t max_read);
 
-void TRANSFER_ReadFifoWord(uint8_t channel, uint8_t* data_out);
+void DriverArinc_ReadFifoWord(uint8_t channel, uint8_t* data_out);
 
 // Немедленная передача 32-битного ARINC-слова на указанный канал (0..3)
 // data – 4 байта в порядке: статус/метка, байты 2,3,4 (little-endian, как в памяти)
-void TRANSFER_SendImmediate(uint8_t channel, const uint8_t *data);
+void DriverArinc_SendImmediate(uint8_t channel, const uint8_t *data);
 
 // Запись слова в память (низкоуровневая)
-void TRANSFER_WriteWord(uint16_t addr, uint8_t *data);
+void DriverArinc_WriteWord(uint16_t addr, uint8_t *data);
 
 // Управление loopback (маска каналов + автоматическая установка бита LOOP в MCR)
-void TRANSFER_SetLoopback(uint8_t mask);
+void DriverArinc_SetLoopback(uint8_t mask);
 
 void Init_Holt(SPI_HandleTypeDef *hspi,
 		GPIO_TypeDef *cs_port, uint16_t cs_pin,
@@ -254,7 +254,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
  * Для отправки STM32 пишет 4 байта через команду 0x94TT (немедленная передача) или через дескрипторы планировщика.
  */
 
-#endif /* INC_TRANSFER_HOLT_H_ */
+#endif /* INC_DRIVERARINC_H_ */
 
 /*
  *** Общая информация ***

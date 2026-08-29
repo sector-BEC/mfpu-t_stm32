@@ -5,22 +5,22 @@
  * 2. write_byte_to_map() – команда 0x84. Используется для записи байта по текущему MAP.
  * 3. read_byte_from_map() – команда 0x80. Возвращает байт и инкрементирует MAP.
  * 4. write_reg() / read_reg() – косвенный доступ к любому регистру через set_map + write/read.
- * 5. TRANSFER_Init() – сохраняет SPI и пины, инициализирует GPIO для CS, MRST, RUN. Всё правильно.
- * 6. TRANSFER_ResetAndWait() – формирует импульс на MRST (HIGH → LOW), затем читает MSR до установки бита READY (бит 7). Соответствует даташиту.
- * 7. TRANSFER_ConfigMaster() – запись в MCR с использованием битовых масок.
- * 8. TRANSFER_ConfigRxChannel() – сборка байта по структуре и запись в ARXCn.
- * 9. TRANSFER_ConfigTxChannel() – аналогично для ATXCn.
- * 10. TRANSFER_SetFifoThreshold() – запись в FTV (0x8050).
- * 11. TRANSFER_Start() / Stop() – управление пином RUN.
- * 12. TRANSFER_ReadReceivedWord() – вычисление адреса по каналу/метке, установка MAP, посылка 0x80 и чтение 4 байт. После 0x80 MAP инкрементируется, и чтение подряд даёт статус+3 байта.
- * 13. TRANSFER_SendImmediate() – команда 0x94 + channel и 4 байта данных. Соответствует 100101TT.
- * 14. TRANSFER_ReadLastReceived() – команда 0xC0 | (channel<<2) и затем чтение 4 байт.
+ * 5. DriverArinc_Init() – сохраняет SPI и пины, инициализирует GPIO для CS, MRST, RUN. Всё правильно.
+ * 6. DriverArinc_ResetAndWait() – формирует импульс на MRST (HIGH → LOW), затем читает MSR до установки бита READY (бит 7). Соответствует даташиту.
+ * 7. DriverArinc_ConfigMaster() – запись в MCR с использованием битовых масок.
+ * 8. DriverArinc_ConfigRxChannel() – сборка байта по структуре и запись в ARXCn.
+ * 9. DriverArinc_ConfigTxChannel() – аналогично для ATXCn.
+ * 10. DriverArinc_SetFifoThreshold() – запись в FTV (0x8050).
+ * 11. DriverArinc_Start() / Stop() – управление пином RUN.
+ * 12. DriverArinc_ReadReceivedWord() – вычисление адреса по каналу/метке, установка MAP, посылка 0x80 и чтение 4 байт. После 0x80 MAP инкрементируется, и чтение подряд даёт статус+3 байта.
+ * 13. DriverArinc_SendImmediate() – команда 0x94 + channel и 4 байта данных. Соответствует 100101TT.
+ * 14. DriverArinc_ReadLastReceived() – команда 0xC0 | (channel<<2) и затем чтение 4 байт.
  * Согласно таблице 1, для этой команды количество данных = 4, auto-increment = No.
  * Это значит, что после отправки опкода нужно просто прочитать 4 байта (без дополнительной 0x80).
- * 15. TRANSFER_SetLoopback() - Управление loopback (для тестов и отладки)
+ * 15. DriverArinc_SetLoopback() - Управление loopback (для тестов и отладки)
  */
 
-#include "transfer_holt.h"
+#include "DriverArinc.h"
 
 /*
  * brief
@@ -177,7 +177,7 @@ static uint8_t read_reg(uint16_t addr)
  * - run_port_, run_pin_ – для RUN.
  *
  * ----- Простыми словами -----
- * TRANSFER_Init выполняет низкоуровневую привязку драйвера к конкретному аппаратному обеспечению микроконтроллера (STM32).
+ * DriverArinc_Init выполняет низкоуровневую привязку драйвера к конкретному аппаратному обеспечению микроконтроллера (STM32).
  * - Запоминает (сохраняет в статических переменных), через какой SPI, какие пины и порты нужно управлять HI-3220.
  * - Настраивает эти пины как выходы (чтобы мы могли дёргать CS, MRST, RUN).
  * - Устанавливает начальные состояния пинов (CS = высокий, RUN = низкий), чтобы HI-3220 находился в известном состоянии до вызова TRANSFER_ResetAndWait.
@@ -185,7 +185,7 @@ static uint8_t read_reg(uint16_t addr)
  * Без этого драйвер не знал бы, куда подключать CS, какую ножку SPI использовать и т.д.
  * Это как сказать: «Вот SPI3, вот пины PB0, PB1, PC13 – работай с ними».
  */
-void TRANSFER_Init(SPI_HandleTypeDef *hspi,
+void DriverArinc_Init(SPI_HandleTypeDef *hspi,
                    GPIO_TypeDef *cs_port_, uint16_t cs_pin_,
                    GPIO_TypeDef *mrst_port_, uint16_t mrst_pin_,
                    GPIO_TypeDef *run_port_, uint16_t run_pin_)
@@ -236,8 +236,8 @@ void TRANSFER_Init(SPI_HandleTypeDef *hspi,
     }
 
     /*
-     * Без вызова TRANSFER_Init драйвер не будет знать, как управлять чипом, и последующие вызовы (например, TRANSFER_ConfigMaster) либо не скомпилируются, либо будут использовать неинициализированные указатели (что приведёт к зависанию).
-     * Поэтому TRANSFER_Init – это обязательный первый шаг перед любой работой с HI-3220.
+     * Без вызова DriverArinc_Init драйвер не будет знать, как управлять чипом, и последующие вызовы (например, TRANSFER_ConfigMaster) либо не скомпилируются, либо будут использовать неинициализированные указатели (что приведёт к зависанию).
+     * Поэтому DriverArinc_Init – это обязательный первый шаг перед любой работой с HI-3220.
      */
 }
 
@@ -247,9 +247,9 @@ void TRANSFER_Init(SPI_HandleTypeDef *hspi,
  * Выполняет аппаратный сброс чипа (импульс на MRST) и ожидает перехода в состояние READY (бит в регистре MSR).
  * Зачем нужна:
  * После включения питания или в случае сбоя чип должен быть инициализирован. Без этой функции регистры и память могут находиться в неопределённом состоянии.
- * Обязательна для вызова сразу после TRANSFER_Init().
+ * Обязательна для вызова сразу после DriverArinc_Init().
  */
-void TRANSFER_ResetAndWait(void)
+void DriverArinc_ResetAndWait(void)
 {
     if (mrst_port) {
         HAL_GPIO_WritePin(mrst_port, mrst_pin, GPIO_PIN_SET);
@@ -276,7 +276,7 @@ void TRANSFER_ResetAndWait(void)
  * Это удобно, потому что на шине ARINC 429 биты идут в порядке от старшего к младшему, а в памяти микроконтроллера обычно хранят метку как обычный байт.
  * Включив AFLIP, мы избавляемся от ручного битового реверса.
  */
-void TRANSFER_ConfigMaster(uint8_t enable_rx, uint8_t flip_labels, uint8_t enable_tx)
+void DriverArinc_ConfigMaster(uint8_t enable_rx, uint8_t flip_labels, uint8_t enable_tx)
 {
     uint8_t val = 0;
     if (enable_rx) val |= HI3220_MCR_A429RX;
@@ -301,7 +301,7 @@ void TRANSFER_ConfigMaster(uint8_t enable_rx, uint8_t flip_labels, uint8_t enabl
  *
  * Функция формирует байт и записывает его.
  */
-void TRANSFER_ConfigRxChannel(uint8_t channel, const HI3220_RxConfig *cfg)
+void DriverArinc_ConfigRxChannel(uint8_t channel, const HI3220_RxConfig *cfg)
 {
     if (channel > 15) return;
     uint16_t addr = HI3220_RXC0 + channel;
@@ -331,7 +331,7 @@ void TRANSFER_ConfigRxChannel(uint8_t channel, const HI3220_RxConfig *cfg)
  *
  * Важно: для immediate передачи (команда 0x94) планировщик можно не запускать; достаточно run_stop = 0. Передатчик всё равно сможет отправить слово по команде.
  */
-void TRANSFER_ConfigTxChannel(uint8_t channel, const HI3220_TxConfig *cfg)
+void DriverArinc_ConfigTxChannel(uint8_t channel, const HI3220_TxConfig *cfg)
 {
     if (channel > 7) return;
     uint16_t addr = HI3220_TXC0 + channel;
@@ -359,7 +359,7 @@ void TRANSFER_ConfigTxChannel(uint8_t channel, const HI3220_TxConfig *cfg)
  * Зачем нужна:
  * Если используется FIFO для накопления сообщений, эта функция позволяет настроить момент оповещения (например, когда накопилось 10 слов).
  */
-void TRANSFER_SetFifoThreshold(uint8_t channel, uint8_t threshold)
+void DriverArinc_SetFifoThreshold(uint8_t channel, uint8_t threshold)
 {
     if (channel > 15) return;
     if (threshold > 63) threshold = 63;   // в HI-3220 порог 0..63 (6 бит)
@@ -376,14 +376,14 @@ void TRANSFER_SetFifoThreshold(uint8_t channel, uint8_t threshold)
  * Зачем нужны:
  * Позволяют программно запускать и останавливать обмен данными. Без вызова Start() чип не будет обрабатывать шины, даже если MCR настроен. Это ключевое управление рабочим циклом.
  */
-void TRANSFER_Start(void)
+void DriverArinc_Start(void)
 {
     if (run_port) {
         HAL_GPIO_WritePin(run_port, run_pin, GPIO_PIN_SET);
     }
 }
 
-void TRANSFER_Stop(void)
+void DriverArinc_Stop(void)
 {
     if (run_port) {
         HAL_GPIO_WritePin(run_port, run_pin, GPIO_PIN_RESET);
@@ -399,7 +399,7 @@ void TRANSFER_Stop(void)
  * Receive FIFO Count - регистры RFC0…RFC15 (0x8068…0x8077).
  * Чтение даёт текущее количество слов в FIFO. Запись 0xA5 в этот регистр очищает FIFO (стр. 21).
 */
-void TRANSFER_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t max_read)
+void DriverArinc_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t max_read)
 {
 	/*Прочитать флаги порога (какие FIFO не пусты)*/
 	uint8_t ftfl = read_reg(HI3220_FTFL);
@@ -447,7 +447,7 @@ void TRANSFER_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t max
  * Для чтения из FIFO используется специальная SPI-команда 0xC0 | (channel << 2) (стр. 43–44).
  * Она автоматически читает 4 байта (одно ARINC-слово) из FIFO выбранного канала.
  */
-void TRANSFER_ReadFifoWord(uint8_t channel, uint8_t* data_out)
+void DriverArinc_ReadFifoWord(uint8_t channel, uint8_t* data_out)
 {
 	if (channel > 15 || !data_out) return;
 	uint8_t cmd = 0xC0 | (channel << 2); /* 1100 0000 + CCCC00 */
@@ -468,7 +468,7 @@ void TRANSFER_ReadFifoWord(uint8_t channel, uint8_t* data_out)
  *
  * Этот механизм позволяет CPU в любой момент отправить сообщение, даже если планировщик работает на том же канале (слово встанет в очередь).
  */
-void TRANSFER_SendImmediate(uint8_t channel, const uint8_t *data)
+void DriverArinc_SendImmediate(uint8_t channel, const uint8_t *data)
 {
     if (channel > 7 || !data) return;
     uint8_t cmd = 0xA4 | (channel & 0x07);   // 0xA4..0xA7
@@ -479,7 +479,7 @@ void TRANSFER_SendImmediate(uint8_t channel, const uint8_t *data)
 }
 
 
-void TRANSFER_WriteWord(uint16_t addr, uint8_t *data)
+void DriverArinc_WriteWord(uint16_t addr, uint8_t *data)
 {
     set_map(addr);
     uint8_t cmd = 0x88;   // Write memory at current MAP (HI-3220)
@@ -490,7 +490,7 @@ void TRANSFER_WriteWord(uint16_t addr, uint8_t *data)
 }
 
 
-void TRANSFER_SetLoopback(uint8_t mask)
+void DriverArinc_SetLoopback(uint8_t mask)
 {
     // Записать маску в LOOPBACK
     write_reg(HI3220_LOOPBACK, mask);
@@ -506,13 +506,13 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
                GPIO_TypeDef *run_port_, uint16_t run_pin_)
 {
 	// 1. Низкоуровневая инициализация (SPI, GPIO)
-	TRANSFER_Init(&hspi, cs_port_, cs_pin_, mrst_port_, mrst_pin_, run_port_, run_pin_);
+	DriverArinc_Init(&hspi, cs_port_, cs_pin_, mrst_port_, mrst_pin_, run_port_, run_pin_);
 
 	// 2. Сброс и ожидание READY
-	TRANSFER_ResetAndWait();
+	DriverArinc_ResetAndWait();
 
 	// 3. Глобальное включение приёма (передачу включим позже)
-	TRANSFER_ConfigMaster(1, 1, 0);   // RX on, FLIP on, TX off
+	DriverArinc_ConfigMaster(1, 1, 0);   // RX on, FLIP on, TX off
 
 	// 4. Настройка всех приёмных каналов (0..15)
 	HI3220_RxConfig rx_cfg = {
@@ -524,7 +524,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
 	};
 	for (int ch = 0; ch < 16; ch++)
 	{
-		TRANSFER_ConfigRxChannel(ch, &rx_cfg);
+		DriverArinc_ConfigRxChannel(ch, &rx_cfg);
 	}
 
 	// 5. Настройка FIFO Enable Map – разрешить все метки (0..255) для всех каналов
@@ -543,7 +543,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
 	// 6. Установить порог FIFO = 1 (сигнал при появлении хотя бы одного слова)
 	for (int ch = 0; ch < 16; ch++)
 	{
-		TRANSFER_SetFifoThreshold(ch, 1);
+		DriverArinc_SetFifoThreshold(ch, 1);
 	}
 
 	// 7. Настройка передатчиков (для immediate передачи)
@@ -559,7 +559,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
 	};
 	for (int ch = 0; ch < 8; ch++)
 	{
-		TRANSFER_ConfigTxChannel(ch, &tx_cfg);
+		DriverArinc_ConfigTxChannel(ch, &tx_cfg);
 	}
 
 	// 8. Включить глобальную передачу (бит A429TX в MCR)
@@ -571,7 +571,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
 	// TRANSFER_SetLoopback(0x01);
 
 	// 10. Запустить чип (RUN = HIGH)
-	TRANSFER_Start();
+	DriverArinc_Start();
 }
 
 

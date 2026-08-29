@@ -18,9 +18,4 @@ void Logic_Tick1ms(void);
  * обработка повторов сообщений №1. */
 void Logic_Process(void);
 
-/* Событие клавиатуры от драйвера сканирования клавиш (вызывается из
- * Logic_Tick1ms или напрямую из обработчика сканера). Ставит в очередь
- * сообщение №1 на активную линию. */
-void Logic_KeyEvent(uint8_t key_code);
-
 #endif /* INC_LOGIC_H_ */

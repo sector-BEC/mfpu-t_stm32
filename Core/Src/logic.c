@@ -1,10 +1,11 @@
 #include "logic.h"
-#include "transfer_holt.h"
+#include "DriverArinc.h"
 #include "arinc_words.h"
 #include <string.h>
 #include "Backlight.h"
 #include "KeypadCtrl.h"
 #include "SRAM.h"
+#include "Transfer.h"
 
 /* =====================================================================
  * Маппинг линий связи ЛС1-6 (см. п.1 ПИВ) на каналы HI-3220.
@@ -39,13 +40,13 @@ static struct {
     uint8_t  channel[RX_QUEUE_SIZE];
     uint8_t  word[RX_QUEUE_SIZE][4];
     uint16_t head, tail;
-} rx_queue;
+} rx_queue = {0};
 
 static struct {
     uint8_t  channel[TX_QUEUE_SIZE];
     uint8_t  word[TX_QUEUE_SIZE][4];
     uint16_t head, tail;
-} tx_queue;
+} tx_queue = {0};
 
 static bool queue_push(uint8_t *qch, uint8_t qw[][4], uint16_t *head, uint16_t *tail,
                         uint16_t size, uint8_t ch, const uint8_t *word)
@@ -83,24 +84,9 @@ typedef struct {
     uint8_t  healthy;        /* признак исправности изделия */
     uint8_t  sw_version;     /* номер версии ПО, 0..127 */
     uint16_t sw_checksum;    /* CRC-16-CCITT прошивки, см. TODO в Logic_Init */
-
-    LineId   active_line;    /* выбранная линия для msg1 (табл.12) */
-
-    /* локальные данные для сообщения №2 */
-    // uint8_t  layout_rus;
-    // uint8_t  backlight_auto;
-    // uint8_t  backlight_level;
-    // uint8_t  illum_level;
-
-    /* состояние компонентов для сообщения №9 (тест-контроль, табл.21) */
-    // uint8_t  backlight_ctrl_ok;
-    // uint8_t  keypad_ctrl_ok;
-    // uint8_t  illum_sensor_ok;
-
-    // uint32_t uptime_3min;    /* наработка, ед. = 3 мин, 18 бит (табл.13) */
 } MfpuState;
 
-static MfpuState mfpuState;
+static MfpuState mfpuState = {0};
 
 /* ---------------------------------------------------------------------
  * Таймеры (обновляются: 1мс-поле -- в Logic_Tick1ms, 10мс-поля -- в
@@ -109,19 +95,6 @@ static MfpuState mfpuState;
 static volatile uint32_t selftest_timer_ms  = 0;
 static uint32_t broadcast_timer_ms = 0;
 static uint32_t uptime_accum_ms    = 0;
-
-/* ---------------------------------------------------------------------
- * Ожидание подтверждения (msg8) для отправленного msg1
- * --------------------------------------------------------------------- */
-typedef struct {
-    bool     pending;
-    uint8_t  tx_channel;
-    uint8_t  retries_left;
-    uint32_t retry_timer_ms;
-    uint8_t  word[4];
-} PendingAck;
-
-static PendingAck pending_ack;
 
 /* ---------------------------------------------------------------------
  * Вспомогательные функции маппинга
@@ -134,16 +107,6 @@ static int device_to_tx_channel(uint8_t device_id)
         case ID_PUI:       return (int)TX_CH_PUI;
         default:           return -1; /* неизвестный/некорректный отправитель */
     }
-}
-
-static uint8_t active_line_to_tx_channel(void)
-{
-    return (mfpuState.active_line == LINE_ID_RIGHT) ? TX_CH_MFI_RIGHT : TX_CH_MFI_LEFT;
-}
-
-static uint8_t active_line_to_recipient(void)
-{
-    return (mfpuState.active_line == LINE_ID_RIGHT) ? (uint8_t)ID_MFI_RIGHT : (uint8_t)ID_MFI_LEFT;
 }
 
 /* Итоговая матрица состояния для всех исходящих слов, с учётом приоритета */
@@ -217,7 +180,7 @@ static void handle_msg7(const uint8_t word[4])
 
     /* "Обработка сообщений №8 не выполняется в режиме тест-контроль" (п.1.3.2) */
     if (ok && mfpuState.mode == OPMODE_WORK) {
-        mfpuState.active_line = message7.active_line;
+        TransferSetActiveLine(message7.active_line);
     }
 
     int tx_ch = device_to_tx_channel(message7.sender);
@@ -232,15 +195,15 @@ static void handle_msg8(const uint8_t word[4])
 {
     Msg8_Ack message8;
     if (!ARINC_ParseMsg8(word, &message8)) return; /* некорректный формат -- игнор */
-    if (!pending_ack.pending) return;       /* мы ничего не ждём -- игнор */
+    if (!TransferIsPending()) return;       /* мы ничего не ждём -- игнор */
 
     int from_ch = device_to_tx_channel(message8.sender);
-    if (from_ch != (int)pending_ack.tx_channel) return; /* ack не от того МФИ */
+    if (from_ch != (int)TransferGetPendingChannel()) return; /* ack не от того МФИ */
 
     /* И успех, и ошибка формата снимают наше ожидание: повторная отправка
      * того же слова не исправит ошибку формата на приёмной стороне.
      * Если требуется другая трактовка XFER_ERROR -- уточнить. */
-    pending_ack.pending = false;
+    TransferSetPending(false);
 }
 
 static void dispatch_incoming(uint8_t rx_channel, const uint8_t word[4])
@@ -258,52 +221,6 @@ static void dispatch_incoming(uint8_t rx_channel, const uint8_t word[4])
              * содержат только адресованный МФПУ-Т трафик. */
             break;
     }
-}
-
-/* =====================================================================
- * Отправка событий клавиатуры (msg1) с повтором
- * ===================================================================== */
-
-void Logic_KeyEvent(uint8_t key_code)
-{
-    uint8_t recipient = active_line_to_recipient();
-    uint8_t tx_ch     = active_line_to_tx_channel();
-
-    uint8_t word[4];
-    ARINC_BuildKeyMsg(recipient, key_code, current_matrix(), word);
-
-    send_word(tx_ch, word);
-
-    /* Одновременно ожидаем подтверждение только для одного события --
-     * ПИВ описывает события клавиатуры как "по готовности" (нечастые
-     * относительно окна ретраев 40мс x 5). Если нужно поддержать очередь
-     * из нескольких одновременно неподтверждённых событий -- расширить
-     * PendingAck до массива.
-     * Определённо нужен массив, но пока это лишь набросок*/
-    pending_ack.pending        = true;
-    pending_ack.tx_channel     = tx_ch;
-    pending_ack.retries_left   = RETRY_MAX_COUNT - 1u; /* первая попытка уже отправлена */
-    pending_ack.retry_timer_ms = RETRY_INTERVAL_MS;
-    memcpy(pending_ack.word, word, 4);
-}
-
-static void process_retry(uint32_t elapsed_ms)
-{
-    if (!pending_ack.pending) return;
-
-    if (pending_ack.retry_timer_ms > elapsed_ms) {
-        pending_ack.retry_timer_ms -= elapsed_ms;
-        return;
-    }
-
-    if (pending_ack.retries_left == 0u) {
-        pending_ack.pending = false; /* попытки исчерпаны (п.1.2.4) */
-        return;
-    }
-
-    send_word(pending_ack.tx_channel, pending_ack.word);
-    pending_ack.retries_left--;
-    pending_ack.retry_timer_ms = RETRY_INTERVAL_MS;
 }
 
 /* Учёт времени наработки МФПУ*/
@@ -334,8 +251,6 @@ static void send_next_broadcast_word(void)
     uint8_t word[4];
     bool test_mode = (mfpuState.mode == OPMODE_TEST_CONTROL);
 
-    // TODO: взять у Ивана45: раскладку клавиатуры (layout), режим управления яркости (backlight_auto) и яркость подсветки (backlight_level), уровень освещённости датчика (illum_level)
-
     KeypadCtrlUpdate();
 	BacklightUpdate();
 
@@ -358,11 +273,11 @@ static void send_next_broadcast_word(void)
     /* msg3 или msg9 */
     if (test_mode)
     {
-		ARINC_BuildMsg9(mfpuState.ready, mfpuState.healthy, 1u, mfpuState.sw_version, mfpuState.active_line,
+		ARINC_BuildMsg9(mfpuState.ready, mfpuState.healthy, 1u, mfpuState.sw_version, TransferGetActiveLine(),
 						  BacklightGetOperability(), KeypadCtrlGetOperability(), BacklightGetOperability(),
 						  current_matrix(), word);
 	} else {
-		ARINC_BuildMsg3(mfpuState.ready, mfpuState.healthy, 0u, mfpuState.sw_version, mfpuState.active_line,
+		ARINC_BuildMsg3(mfpuState.ready, mfpuState.healthy, 0u, mfpuState.sw_version, TransferGetActiveLine(),
 						 current_matrix(), word);
 	}
     send_word(TX_CH_MFI_LEFT, word);
@@ -379,26 +294,18 @@ static void send_next_broadcast_word(void)
 
 void Logic_Init(void)
 {
-    memset(&rx_queue, 0, sizeof(rx_queue));
-    memset(&tx_queue, 0, sizeof(tx_queue));
-    memset(&pending_ack, 0, sizeof(pending_ack));
-    memset(&mfpuState, 0, sizeof(mfpuState));
-
     mfpuState.mode        = OPMODE_WORK;
     mfpuState.ready       = 0;  /* поднимется по завершении самопроверки */
     mfpuState.healthy     = 0;
-    mfpuState.sw_version  = GetSWVersion();  /* TODO: подставить реальный номер версии ПО */
-    mfpuState.sw_checksum = GetSWCheckSum();  /* TODO: CRC-16-CCITT образа прошивки (константа
-                          * сборки либо расчёт по флеш-región при старте) */
-    mfpuState.active_line = LINE_ID_LEFT; /* "при подаче питания -- взаимодействие
-                                     * с левым МФИ-12Т по ЛС1" (п.1) */
+    mfpuState.sw_version  = GetSWVersion();
+    mfpuState.sw_checksum = GetSWCheckSum();
 
     selftest_timer_ms  = 0;
     broadcast_timer_ms = 0;
     uptime_accum_ms    = 0;
 
     /* ВАЖНО: для точного соответствия протоколу нужно поправить
-     * конфигурацию HI-3220 в Init_Holt() (transfer_holt.c):
+     * конфигурацию HI-3220 в Init_Holt() (DriverArinc.c):
      *  - HI3220_RxConfig.parity_en  = 1  (бит32 станет флагом чётности)
      *  - HI3220_TxConfig.parity_en  = 1, even_odd = 0  (нечётная чётность
      *    вставляется аппаратно -- этот модуль бит32 не считает)
@@ -441,7 +348,7 @@ void Logic_Process(void)
     }
 
     /* 3. Повтор неподтверждённых сообщений №1 */
-    process_retry(PROC_PERIOD_MS);
+    // process_retry(PROC_PERIOD_MS);
 
     /* 4. Периодическая рассылка: 5Гц ("работа") / 10Гц ("тест-контроль") */
     uint32_t period = (mfpuState.mode == OPMODE_TEST_CONTROL) ? TEST_BROADCAST_MS
