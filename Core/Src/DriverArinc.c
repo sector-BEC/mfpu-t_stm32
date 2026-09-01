@@ -428,7 +428,7 @@ void DriverArinc_PollRxFifos(void (*callback)(uint8_t, const uint8_t*), uint8_t 
 		for (int i = 0; i < size; i++)
 		{
 			uint8_t word[4];
-			TRANSFER_ReadFifoWord(ch, word);
+			DriverArinc_ReadFifoWord(ch, word);
 			if (callback) // TODO: callback function
 			{
 				callback(ch, word); /*callback – функция, которая обрабатывает принятое слово.*/
@@ -506,7 +506,7 @@ void Init_Holt(SPI_HandleTypeDef *hspi,
                GPIO_TypeDef *run_port_, uint16_t run_pin_)
 {
 	// 1. Низкоуровневая инициализация (SPI, GPIO)
-	DriverArinc_Init(&hspi, cs_port_, cs_pin_, mrst_port_, mrst_pin_, run_port_, run_pin_);
+	DriverArinc_Init(hspi, cs_port_, cs_pin_, mrst_port_, mrst_pin_, run_port_, run_pin_);
 
 	// 2. Сброс и ожидание READY
 	DriverArinc_ResetAndWait();

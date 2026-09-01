@@ -338,7 +338,7 @@ void Logic_Tick1ms(void)
 void Logic_Process(void)
 {
     /* 1. Опрос приёмных FIFO HI-3220, слова складываются в rx_queue */
-    TRANSFER_PollRxFifos(rx_callback, MAX_WORDS_PER_POLL);
+    DriverArinc_PollRxFifos(rx_callback, MAX_WORDS_PER_POLL);
 
     /* 2. Диспетчеризация всех полученных слов */
     uint8_t ch, word[4];
@@ -375,6 +375,6 @@ void Logic_Process(void)
 					&tx_ch,
 					tx_word))
     {
-        TRANSFER_SendImmediate(tx_ch, tx_word);
+        DriverArinc_SendImmediate(tx_ch, tx_word);
     }
 }
