@@ -6,6 +6,8 @@
  */
 
 #include "KeypadCtrl.h"
+#include "SRAM.h"
+#include "Backlight.h"
 
 uint8_t keypadCtrlWork_ = KEYPAD_WORK_FAILURE;
 uint16_t lastKeyPress_ = 0;
@@ -16,7 +18,9 @@ static I2C_HandleTypeDef* keypadHi2c2;
 uint8_t intTCA8418	= 0;							// флаг прерывания от клавиатур
 uint8_t regValueKey = 0;
 uint8_t regAddresValueKEY = 0x04;
-uint16_t TCA8418_I2C_ADDR = 0x34;
+uint16_t TCA8418_I2C_ADDR = 0x68U;
+uint8_t data_to_write_1[10] = {0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01};
+uint8_t data_to_write_2[10] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
 
 // Код клавишь которые должны возвращать при нажатии клавишь. Реальные коды ниже
 static const uint8_t hexKeyPadCode[] = {
@@ -54,6 +58,21 @@ void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin)
 // enable interrup TCA8418
 	uint8_t outbuffer_4[2] = {0x01, 0x91};
 	HAL_I2C_Master_Transmit(keypadHi2c2, 0x68, outbuffer_4, sizeof(outbuffer_4), 1);
+
+
+	// Клавиатурный матричный контроллер
+    uint8_t data[3];
+
+    // 1. Настройка GPIO: выбираем, какие пины будут строками и столбцами
+    // Регистр KP_GPIO1 (0x2C): биты 0-7 для COL0-7, биты 0-3 для ROW0-3
+    data[0] = 0xFF; // Все COL0-7 как столбцы
+    data[1] = 0x07; // ROW0-2 как строки (биты 0,1,2)
+    data[2] = 0x00; // ROW3-7 как GPIO (если не используются)
+    HAL_I2C_Mem_Write(keypadHi2c2, 0x34, 0x2C, 1, data, 3, 100);
+
+    // 2. Настройка прерываний
+    data[0] = 0x91; // Включить прерывания по нажатию/отпусканию
+    HAL_I2C_Mem_Write(keypadHi2c2, 0x34, 0x01, 1, data, 1, 100);
 }
 
 // Текущий признак исправности
@@ -81,28 +100,66 @@ void KeypadCtrlUpdate()
 	/******************************************************************************************/
 	/* Отработка нажатий кнопок TCA8418																												*/
 	/******************************************************************************************/
-	if(intTCA8418 == 1)
-	{
-		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regAddresValueKEY, 1, 1);
-		HAL_I2C_Master_Receive(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regValueKey, 1, 1);
-		uint8_t *ValueKey = &regValueKey;
-		if (*ValueKey != 0)
+    uint8_t int_status = 0;
+    uint8_t event_count = 0;
+    uint8_t key_event = 0;
+
+    // 1. Читаем статус прерываний
+    HAL_I2C_Mem_Read(keypadHi2c2, TCA8418_I2C_ADDR, 0x02, 1, &int_status, 1, 100);
+
+    if (int_status) {
+        // 2. Читаем количество событий в очереди
+        HAL_I2C_Mem_Read(keypadHi2c2, TCA8418_I2C_ADDR, 0x03, 1, &event_count, 1, 100);
+
+        // 3. Читаем событие (если есть)
+        if (event_count > 0) {
+            HAL_I2C_Mem_Read(keypadHi2c2, TCA8418_I2C_ADDR, 0x04, 1, &key_event, 1, 100);
+            // Анализируем key_event: бит 7 = 1 (нажатие), 0 (отпускание)
+            // биты 0-6 = код клавиши
+        }
+
+        if(key_event == 129 || key_event == 1)
+        {
+        	SetBuffer(data_to_write_1);
+        	HAL_Delay(10);
+			SRAMRead();
+			BacklightUpdate();
+        }
+        else
+		if(key_event == 139 || key_event == 11)
 		{
-			if (((*ValueKey) & (1 << 7)) == 0)
-			{
-				// отправка кода отпущенной кнопки
-				messageTX();
-			}
-			else if (((*ValueKey) & (1 << 7)) != 0)
-			{
-				// отправка кода нажатой кнопки
-				messageTX();
-			}
+			SetBuffer(data_to_write_2);
+			HAL_Delay(10);
+			SRAMRead();
+			BacklightUpdate();
 		}
-		intTCA8418=0;																											// сбросили флаг обработки прерывания
-		uint8_t clearInterrup[2] = {0x02, 0x1F};
-		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), clearInterrup, sizeof(clearInterrup), 1);
-	}
+
+        // 4. Очищаем флаг прерывания
+        uint8_t clear_cmd = 0x01;
+        HAL_I2C_Mem_Write(keypadHi2c2, TCA8418_I2C_ADDR, 0x02, 1, &clear_cmd, 1, 100);
+    }
+//	if(intTCA8418 == 1)
+//	{
+//		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regAddresValueKEY, 1, 1);
+//		HAL_I2C_Master_Receive(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regValueKey, 1, 1);
+//		uint8_t *ValueKey = &regValueKey;
+//		if (*ValueKey != 0)
+//		{
+//			if (((*ValueKey) & (1 << 7)) == 0)
+//			{
+//				// отправка кода отпущенной кнопки
+//				messageTX();
+//			}
+//			else if (((*ValueKey) & (1 << 7)) != 0)
+//			{
+//				// отправка кода нажатой кнопки
+//				messageTX();
+//			}
+//		}
+//		intTCA8418=0;																											// сбросили флаг обработки прерывания
+//		uint8_t clearInterrup[2] = {0x02, 0x1F};
+//		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), clearInterrup, sizeof(clearInterrup), 1);
+//	}
 }
 
 // Последняя нажатая кнопка

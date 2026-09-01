@@ -25,6 +25,7 @@
 #include "logic.h"
 #include "KeypadCtrl.h"
 #include "Backlight.h"
+#include "SRAM.h"
 #include "lcd1602_i2c.h"
 /* USER CODE END Includes */
 
@@ -58,6 +59,8 @@ TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 volatile uint8_t flag_1ms = 0;
 volatile uint8_t flag_10ms = 0;
+volatile uint8_t flag_1000ms = 0;
+uint8_t isFirst = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,6 +89,14 @@ void My_SysTick_Handler(void)
     if (counter >= 10) {
         counter = 0;
         flag_10ms = 1;
+    }
+
+    static uint8_t counter2 = 0;
+    counter2++;
+
+    if (counter2 >= 200) {
+    	counter2 = 0;
+    	flag_1000ms = 1;
     }
 }
 /* USER CODE END 0 */
@@ -128,8 +139,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   KeypadCtrlInit(&hi2c2);
   BacklightInit(&hi2c2, &htim3, &lcd1602_Handle);
+  SRAMInit(&hi2c1);
 
-  lcd1602_Init(&lcd1602_Handle, &hi2c1 , PCF8574_ADDRESS);
+  lcd1602_Init(&lcd1602_Handle, &hi2c2 , PCF8574_ADDRESS);
 
   //lcd1602_Print(&lcd1602_Handle, (uint8_t*)"Wait 10 sec.");
 
@@ -162,8 +174,34 @@ int main(void)
       Logic_Process();  /* опрос FIFO, диспетчеризация, ретраи, рассылка */
     }
 
+    if(flag_1000ms)
+	{
+    	flag_1000ms = 0;
+    	if(isFirst)
+    	{
+    		isFirst = 0;
+    		SRAMWrite();
+			HAL_Delay(10);
+    	}
+//    	uint8_t result = BL_WORK_FAILURE;
+//		for(uint8_t addr=0; addr < 255; addr++)
+//		{
+//			uint16_t addr8 = addr << 1;
+//			//if (HAL_I2C_IsDeviceReady(backlightHi2c2, BH1750_ADDR, 2, 10) == HAL_OK)
+//			if (HAL_I2C_IsDeviceReady(&hi2c1, addr, 2, 10) == HAL_OK)
+//			{
+//				result = BL_WORK_OK;
+//			}
+//			else
+//			{
+//				result = BL_WORK_FAILURE;
+//			}
+//		}
+		SRAMRead();
+	    BacklightUpdate();
+	}
+
     KeypadCtrlUpdate();
-	BacklightUpdate();
 
     /* USER CODE END WHILE */
 

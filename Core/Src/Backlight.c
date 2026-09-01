@@ -8,6 +8,8 @@
 
 #include "Backlight.h"
 #include "PCF8575.h"
+#include <stdio.h>
+#include "SRAM.h"
 
 uint8_t lightWork_ = BL_WORK_FAILURE;
 uint8_t lightMode_ = BL_AUTO_OPERATION_MODE;
@@ -24,6 +26,9 @@ lcd1602_HandleTypeDef* backlightLCD1602_Handle;
 #define BH1750_POWER_ON     0x01
 #define BH1750_RESET        0x07
 #define BH1750_CONT_H_RES   0x10  // Непрерывный режим, высокая точность (1 лк)
+
+uint8_t bb_[15] = {48, 48, 48, 48, 0x2D};
+uint8_t bcurrent_ = 0;
 
 //light
 //uint8_t P0[2] = {0X01, 0x00};
@@ -100,16 +105,43 @@ uint16_t BH1750_ReadLight(void) {
 
 // Возвращает 1 если датчик отвечает, 0 если нет
 uint8_t BH1780_CheckPresence(void) {
-	if (HAL_I2C_IsDeviceReady(backlightHi2c2, (BH1750_ADDR >> 1), 2, 10) == HAL_OK)
+	uint8_t result = BL_WORK_FAILURE;
+	bb_[0] = 48;
+	bb_[1] = 48;
+	bb_[2] = 48;
+	bb_[3] = 48;
+	for(uint8_t addr=0; addr < 255; addr++)
 	{
-		lightWork_ = BL_WORK_OK;
-		return 1;
+		//uint16_t addr8 = addr << 1;
+		//if (HAL_I2C_IsDeviceReady(backlightHi2c2, BH1750_ADDR, 2, 10) == HAL_OK)
+		if (HAL_I2C_IsDeviceReady(backlightHi2c2, addr, 2, 10) == HAL_OK)
+		{
+			lightWork_ = BL_WORK_OK;
+			result = BL_WORK_OK;
+			if(addr == 0x46)
+			{
+				bb_[0] = 49;
+			}
+			else if(addr == 0x4e)
+			{
+				bb_[1] = 49;
+			}
+			else if(addr == 0x68)
+			{
+				bb_[2] = 49;
+			}
+			else if(addr == 0xa0)
+			{
+				bb_[3] = 49;
+			}
+		}
+		else
+		{
+			lightWork_ = BL_WORK_FAILURE;
+		}
 	}
-	else
-	{
-		lightWork_ = BL_WORK_FAILURE;
-	}
-	return 0;
+	lightWork_ = result;
+	return lightWork_;
 	//return (HAL_I2C_IsDeviceReady(backlightHi2c2, BH1780_ADDR_WRITE, 2, 100) == HAL_OK);
 }
 
@@ -152,9 +184,18 @@ void BacklightUpdate()
 			backlightBrightness_ = BH1750_ReadLight();
 
 			uint8_t str[6];
-			lcd1602_SetCursor(backlightLCD1602_Handle, 0, 1);
-			lcd1602_Print(backlightLCD1602_Handle, "______");
-			snprintf((char*)str, sizeof(str), "%lu", backlightBrightness_);
+
+			uint8_t* data = GetBuffer();
+			for(int i=0; i<8; i++)
+			{
+				bb_[5+i] = 48 + data[i];
+			}
+			lcd1602_SetCursor(backlightLCD1602_Handle, 0, 0);
+			lcd1602_Print(backlightLCD1602_Handle, bb_);
+
+//			lcd1602_SetCursor(backlightLCD1602_Handle, 0, 1);
+//			lcd1602_Print(backlightLCD1602_Handle, "______");
+			snprintf((char*)str, sizeof(str), "%5d", backlightBrightness_);
 			lcd1602_SetCursor(backlightLCD1602_Handle, 0, 1);
 			lcd1602_Print(backlightLCD1602_Handle, str);
 
@@ -184,8 +225,8 @@ void BacklightUpdate()
 	}
 	else
 	{
-		lcd1602_SetCursor(backlightLCD1602_Handle, 0, 1);
-		lcd1602_Print(backlightLCD1602_Handle, "______");
+//		lcd1602_SetCursor(backlightLCD1602_Handle, 0, 1);
+//		lcd1602_Print(backlightLCD1602_Handle, "______");
 	}
 }
 
