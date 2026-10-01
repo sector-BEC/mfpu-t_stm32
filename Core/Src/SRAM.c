@@ -12,30 +12,29 @@ I2C_HandleTypeDef* sramhI2c2_;
 
 uint16_t countReadMemory_ = 0;
 uint8_t read_buffer_origin[8];
+uint8_t sramWork_ = SRAM_WORK_OK;
+uint8_t SRAM_FM24CL64B_ADDR = FM24CL64B_WRITE_ADDR;
+
+// Проверка и установка статуса
+void SRAMVerifyWork()
+{
+	sramWork_ = SRAM_WORK_FAILURE;
+	if (HAL_I2C_IsDeviceReady(backlightHi2c2, SRAM_FM24CL64B_ADDR, 2, 10) == HAL_OK)
+	{
+		sramWork_ = SRAM_WORK_OK;
+	}
+}
 
 // Инициализация модуля при старте
 void SRAMInit(I2C_HandleTypeDef* hi2c2)
 {
 	sramhI2c2_ = hi2c2;
+	SRAMVerifyWork();
+	if(sramWork_ == SRAM_WORK_FAILURE)
+	{
+		return;
+	}
 }
-
-//void SRAMWrite(void)
-//{
-//	// 1. Запись данных
-//	HAL_StatusTypeDef status = HAL_ERROR;
-//	status = HAL_I2C_Mem_Write(sramhI2c2_,
-//	                           FM24CL64B_WRITE_ADDR,
-//	                           memory_address,
-//							   I2C_MEMADD_SIZE_16BIT,
-//	                           data_to_write,
-//	                           8,
-//	                           HAL_MAX_DELAY);
-//
-//	if (status == HAL_OK) {
-//	    // Запись выполнена без задержек (NoDelay)
-//	    // Можно сразу приступать к чтению
-//	}
-//}
 
 void SRAMWriteBlock(uint16_t address, uint8_t* cData)
 {
@@ -55,52 +54,6 @@ void SRAMWriteBlock(uint16_t address, uint8_t* cData)
 	    // Можно сразу приступать к чтению
 	}
 }
-
-//void SRAMRead(void)
-//{
-//	// 2. Чтение данных
-//	HAL_StatusTypeDef status = HAL_ERROR;
-//	for(int i=0; i<sizeof(read_buffer); i++)
-//	{
-//		read_buffer[i] = 0;
-//	}
-//	status = HAL_I2C_Mem_Read(sramhI2c2_,
-//							  FM24CL64B_READ_ADDR /* FM24CL64B_WRITE_ADDR */,
-//	                          memory_address,
-//							  I2C_MEMADD_SIZE_16BIT,
-//	                          read_buffer,
-//	                          8,
-//	                          HAL_MAX_DELAY);
-//
-//	if (status == HAL_OK)
-//	{
-//	    // Данные из FM24CL64B теперь лежат в read_buffer
-//	    // Их можно сравнить с data_to_write
-//		if(countReadMemory_ == 0)
-//		{
-//			for(int i=0; i<8; i++)
-//			{
-//				read_buffer_origin[i] = read_buffer[i];
-//			}
-//		}
-//		else
-//		{
-//			int c = 0;
-//			for(int i=0; i<8; i++)
-//			{
-//				if(read_buffer_origin[i] = read_buffer[i])
-//				{
-//					c++;
-//				}
-//			}
-//			if(c>=8)
-//			{
-//				countReadMemory_ = 0;
-//			}
-//		}
-//		countReadMemory_++;
-//	}
-//}
 
 uint8_t* SRAMReadBlock(uint16_t address, uint8_t size)
 {

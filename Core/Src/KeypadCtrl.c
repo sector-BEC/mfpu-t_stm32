@@ -18,7 +18,7 @@ static I2C_HandleTypeDef* keypadHi2c2;
 uint8_t intTCA8418	= 0;							// флаг прерывания от клавиатур
 uint8_t regValueKey = 0;
 uint8_t regAddresValueKEY = 0x04;
-uint16_t TCA8418_I2C_ADDR = 0x68U;
+uint16_t TCA8418_I2C_ADDR = 0x68;
 uint8_t data_to_write_1[10] = {0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01};
 uint8_t data_to_write_2[10] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
 
@@ -41,12 +41,29 @@ void messageTX(void)
 	//
 }
 
+void KeypadCtrlVerifyWork()
+{
+	keypadCtrlWork_ = KEYPAD_WORK_FAILURE;
+	if(HAL_I2C_IsDeviceReady(keypadHi2c2, (uint16_t)0x68, 1, 100))
+	{
+		keypadCtrlWork_ = KEYPAD_WORK_OK;
+		if(KeypadCtrlRegisterRwTest() == 0)
+		{
+			keypadCtrlWork_ = KEYPAD_WORK_FAILURE;
+		}
+	}
+}
+
 // Инициализация модуля при старте
 void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin)
 {
 	keypadHi2c2 = hi2c2_origin;
 // I2C Okay?
-	HAL_I2C_IsDeviceReady(keypadHi2c2, (uint16_t)0x68, 1, 100);
+	KeypadCtrlVerifyWork();
+	if(keypadCtrlWork_ == KEYPAD_WORK_FAILURE)
+	{
+		return;
+	}
 // TCA8418 init
 	uint8_t TCA8418_COL7[2] = {0x1D, 0x3F};
 	HAL_I2C_Master_Transmit(keypadHi2c2, 0x68, TCA8418_COL7, sizeof(TCA8418_COL7), 1);
@@ -75,6 +92,32 @@ void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin)
     HAL_I2C_Mem_Write(keypadHi2c2, 0x34, 0x01, 1, data, 1, 100);
 }
 
+
+// Проверим, что мы можем изменять конфигурацию и что работает механизм автоинкремента адреса (бит 7 регистра `CFG`).
+uint8_t KeypadCtrlRegisterRwTest()
+{
+    uint8_t tx_data, rx_data;
+
+    // 1. Записываем и читаем регистр GPIO_DIR1 (0x23)
+    tx_data = 0xA5; 
+    HAL_I2C_Mem_Write(keypadHi2c2, TCA8418_I2C_ADDR, 0x23, I2C_MEMADD_SIZE_8BIT, &tx_data, 1, I2C_TIMEOUT);
+    HAL_I2C_Mem_Read(keypadHi2c2, TCA8418_I2C_ADDR, 0x23, I2C_MEMADD_SIZE_8BIT, &rx_data, 1, I2C_TIMEOUT);
+    if (rx_data != 0xA5) return 0;
+
+    // 2. Включаем Auto-Increment (бит 7 в регистре CFG = 1)
+    tx_data = 0x80; 
+    HAL_I2C_Mem_Write(hi2c, TCA8418_I2C_ADDR, 0x01, I2C_MEMADD_SIZE_8BIT, &tx_data, 1, I2C_TIMEOUT);
+    
+    // Читаем 3 байта начиная с 0x01. Должны прочитать CFG, INT_STAT, KEY_LCK_EC
+    uint8_t buffer[3] = {0};
+    HAL_I2C_Mem_Read(hi2c, TCA8418_I2C_ADDR, 0x01, I2C_MEMADD_SIZE_8BIT, buffer, 3, I2C_TIMEOUT);
+    
+    if (buffer[0] != 0x80) return 0; // CFG
+    // buffer[1] и buffer[2] должны быть 0x00 (если не было нажатий)
+    
+    return 1;
+}
+
 // Текущий признак исправности
 uint8_t KeypadCtrlGetOperability()
 {
@@ -85,16 +128,10 @@ uint8_t KeypadCtrlGetOperability()
 // Выполнение регулярных задач модуля
 void KeypadCtrlUpdate()
 {
-	//HAL_I2C_Mem_Read(keypadHi2c2, TCA8418_ADDR, TCA8418_INT_STAT, 1, &test_read, 1, 100);
-	if (test_read == 0x0)
+	KeypadCtrlVerifyWork();
+	if(keypadCtrlWork_ == KEYPAD_WORK_FAILURE)
 	{
-		// OK: чип отвечает и регистр сброшен
-		keypadCtrlWork_ = KEYPAD_WORK_OK;
-	}
-	else
-	{
-		// Ошибка: чип не отвечает или данные искажены
-		keypadCtrlWork_ = KEYPAD_WORK_FAILURE;
+		return;
 	}
 
 	/******************************************************************************************/
@@ -138,28 +175,6 @@ void KeypadCtrlUpdate()
         uint8_t clear_cmd = 0x01;
         HAL_I2C_Mem_Write(keypadHi2c2, TCA8418_I2C_ADDR, 0x02, 1, &clear_cmd, 1, 100);
     }
-//	if(intTCA8418 == 1)
-//	{
-//		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regAddresValueKEY, 1, 1);
-//		HAL_I2C_Master_Receive(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), &regValueKey, 1, 1);
-//		uint8_t *ValueKey = &regValueKey;
-//		if (*ValueKey != 0)
-//		{
-//			if (((*ValueKey) & (1 << 7)) == 0)
-//			{
-//				// отправка кода отпущенной кнопки
-//				messageTX();
-//			}
-//			else if (((*ValueKey) & (1 << 7)) != 0)
-//			{
-//				// отправка кода нажатой кнопки
-//				messageTX();
-//			}
-//		}
-//		intTCA8418=0;																											// сбросили флаг обработки прерывания
-//		uint8_t clearInterrup[2] = {0x02, 0x1F};
-//		HAL_I2C_Master_Transmit(keypadHi2c2, (uint16_t)(TCA8418_I2C_ADDR << 1), clearInterrup, sizeof(clearInterrup), 1);
-//	}
 }
 
 // Последняя нажатая кнопка

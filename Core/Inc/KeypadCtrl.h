@@ -16,8 +16,15 @@
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
+// Проверка и установка статуса работоспособности
+void KeypadCtrlVerifyWork(void);
+
 // Инициализация модуля при старте
 void KeypadCtrlInit(I2C_HandleTypeDef* hi2c2_origin);
+
+// Проверим, что мы можем изменять конфигурацию
+// и что работает механизм автоинкремента адреса (бит 7 регистра `CFG`).
+uint8_t KeypadCtrlRegisterRwTest(void);
 
 // Текущий признак исправности
 uint8_t KeypadCtrlGetOperability(void);

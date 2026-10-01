@@ -18,6 +18,12 @@
 #define SRAM_VERSION_ADDRESS	0x2U
 #define SRAM_CHECKSUM_ADDRESS 	0x6U
 
+#define SRAM_WORK_OK 		    0x0U
+#define SRAM_WORK_FAILURE 		0x0U
+
+// Проверка и установка статуса
+void SRAMVerifyWork(void);
+
 // Инициализация модуля при старте
 void SRAMInit(I2C_HandleTypeDef* hi2c2);
 
