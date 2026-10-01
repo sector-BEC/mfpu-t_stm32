@@ -233,8 +233,8 @@ static void accumulate_uptime(void)
     uptime_accum_ms += PROC_PERIOD_MS;
     if (uptime_accum_ms >= UPTIME_UNIT_MS) {
         uptime_accum_ms -= UPTIME_UNIT_MS;
-        if (GetWorkTimeSRAM() < UPTIME_MAX_UNITS) {
-			SetWorkTimeSRAM(GetWorkTimeSRAM()+1);
+        if (SRAMGetWorkTimeSRAM() < UPTIME_MAX_UNITS) {
+			SRAMSetWorkTimeSRAM(SRAMGetWorkTimeSRAM()+1);
         }
     }
 }
@@ -261,7 +261,7 @@ static void send_next_broadcast_word(void)
     send_word(TX_CH_MFI_RIGHT, word);
 
     /* msg4 */
-    ARINC_BuildMsg4(GetWorkTimeSRAM(), current_matrix(), word);
+    ARINC_BuildMsg4(SRAMGetWorkTimeSRAM(), current_matrix(), word);
     send_word(TX_CH_MFI_LEFT, word);
     send_word(TX_CH_MFI_RIGHT, word);
 
@@ -297,8 +297,8 @@ void Logic_Init(void)
     mfpuState.mode        = OPMODE_WORK;
     mfpuState.ready       = 0;  /* поднимется по завершении самопроверки */
     mfpuState.healthy     = 0;
-    mfpuState.sw_version  = GetSWVersion();
-    mfpuState.sw_checksum = GetSWCheckSum();
+    mfpuState.sw_version  = SRAMGetSWVersion();
+    mfpuState.sw_checksum = SRAMGetSWCheckSum();
 
     selftest_timer_ms  = 0;
     broadcast_timer_ms = 0;

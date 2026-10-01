@@ -120,17 +120,17 @@ void KeypadCtrlUpdate()
 
         if(key_event == 129 || key_event == 1)
         {
-        	SetBuffer(data_to_write_1);
+        	SRAMSetBuffer(data_to_write_1);
         	HAL_Delay(10);
-			SRAMRead();
+			//SRAMRead();
 			BacklightUpdate();
         }
         else
 		if(key_event == 139 || key_event == 11)
 		{
-			SetBuffer(data_to_write_2);
+			SRAMSetBuffer(data_to_write_2);
 			HAL_Delay(10);
-			SRAMRead();
+			//SRAMRead();
 			BacklightUpdate();
 		}
 

@@ -22,22 +22,22 @@
 void SRAMInit(I2C_HandleTypeDef* hi2c2);
 
 // Получить время работы устройства
-uint16_t GetWorkTimeSRAM();
+uint16_t SRAMGetWorkTimeSRAM();
 
 // Записать время работы устройства
-void SetWorkTimeSRAM(uint16_t wtime);
+void SRAMSetWorkTimeSRAM(uint16_t wtime);
 
 // Получить версию прошивки
-uint32_t GetSWVersion(void);
+uint32_t SRAMGetSWVersion(void);
 
 // Записать версию прошивки
-void SetSWVersion(uint32_t version);
+void SRAMSetSWVersion(uint32_t version);
 
 // Записать CRC16 прошивки
-void SetSWCheckSum(uint16_t crc16);
+void SRAMSetSWCheckSum(uint16_t crc16);
 
 // Получить CRC16 прошивки
-uint16_t GetSWCheckSum(void);
+uint16_t SRAMGetSWCheckSum(void);
 
 // запись в память
 //void SRAMWrite(void);
@@ -51,8 +51,8 @@ void SRAMWriteBlock(uint16_t address, uint8_t* cData);
 // чтение блока из памяти
 uint8_t* SRAMReadBlock(uint16_t address, uint8_t size);
 
-uint8_t* GetBuffer(void);
-void SetBuffer(uint8_t data[]);
+uint8_t* SRAMGetBuffer(void);
+void SRAMSetBuffer(uint8_t data[]);
 
 
 #endif /* SRAM_H_ */

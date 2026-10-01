@@ -125,22 +125,21 @@ uint8_t* SRAMReadBlock(uint16_t address, uint8_t size)
 	return &read_buffer;
 }
 
-uint8_t* GetBuffer(void)
+uint8_t* SRAMGetBuffer(void)
 {
 	return &read_buffer;
 }
 
-void SetBuffer(uint8_t data[])
+void SRAMSetBuffer(uint8_t data[])
 {
 	for(int i=0; i<8; i++)
 	{
 		data_to_write[i] = data[i];
 	}
-	SRAMWrite();
 }
 
 // Получить время работы устройства
-uint16_t GetWorkTimeSRAM()
+uint16_t SRAMGetWorkTimeSRAM()
 {
 	uint8_t* buffer = SRAMReadBlock(SRAM_TIME_ADDRESS, 2);
 	// Вариант "Little-Endian" (младший байт первым)
@@ -149,7 +148,7 @@ uint16_t GetWorkTimeSRAM()
 }
 
 // Записать время работы устройства
-void SetWorkTimeSRAM(uint16_t wtime)
+void SRAMSetWorkTimeSRAM(uint16_t wtime)
 {
 	uint8_t buffer[2];
 
@@ -161,7 +160,7 @@ void SetWorkTimeSRAM(uint16_t wtime)
 }
 
 // Получить версию прошивки
-uint32_t GetSWVersion()
+uint32_t SRAMGetSWVersion()
 {
 	uint8_t* buffer = SRAMReadBlock(SRAM_VERSION_ADDRESS, 4);
 	// Вариант "Little-Endian" (младший байт первым)
@@ -170,7 +169,7 @@ uint32_t GetSWVersion()
 }
 
 // Записать версию прошивки
-void SetSWVersion(uint32_t version)
+void SRAMSetSWVersion(uint32_t version)
 {
 	uint8_t buffer[4];
 
@@ -184,7 +183,7 @@ void SetSWVersion(uint32_t version)
 }
 
 // Получить CRC16 прошивки
-uint16_t GetSWCheckSum(void)
+uint16_t SRAMGetSWCheckSum(void)
 {
 	uint8_t* buffer = SRAMReadBlock(SRAM_CHECKSUM_ADDRESS, 2);
 	// Вариант "Little-Endian" (младший байт первым)
@@ -193,7 +192,7 @@ uint16_t GetSWCheckSum(void)
 }
 
 // Записать CRC16 прошивки
-void SetSWCheckSum(uint16_t crc16)
+void SRAMSetSWCheckSum(uint16_t crc16)
 {
 	uint8_t buffer[2];
 

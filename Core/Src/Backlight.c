@@ -185,7 +185,7 @@ void BacklightUpdate()
 
 			uint8_t str[6];
 
-			uint8_t* data = GetBuffer();
+			uint8_t* data = SRAMGetBuffer();
 			for(int i=0; i<8; i++)
 			{
 				bb_[5+i] = 48 + data[i];
