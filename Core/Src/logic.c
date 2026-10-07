@@ -14,7 +14,6 @@
 #define WORK_PERIOD_MS             50u
 #define TEST_PERIOD_MS              5u
 #define M1_PERIOD_MS               50u
-#define SELFTEST_MS                30000u
 #define LINE_MISS_LIMIT             3u
 #define KEY_SEND_LIMIT              5u
 #define UPTIME_UNIT_MS           60000u
@@ -74,10 +73,8 @@ static M1Assembly m1[2] = {0};
 static uint8_t line_miss_count[2] = {0};
 static uint8_t line_seen[2] = {0};
 static uint8_t m1_assembly_age[2] = {0};
-static uint8_t selftest_done;
 static KeyTransfer key_transfer = {0};
 
-static uint32_t selftest_elapsed_ms;
 static uint32_t m1_period_elapsed_ms;
 static uint32_t broadcast_elapsed_ms;
 static uint32_t uptime_elapsed_ms;
@@ -162,10 +159,6 @@ static void send_word(uint8_t channel, const uint8_t word[4])
 
 static ArincMatrix normal_or_fault_matrix(void)
 {
-    /* Во время начальной самопроверки ISS2 требует матрицу "Нормальная работа". */
-    if (!selftest_done) {
-        return ARINC_MATRIX_NORMAL;
-    }
     return mfpu.healthy ? ARINC_MATRIX_NORMAL : ARINC_MATRIX_FAULT;
 }
 
@@ -306,31 +299,6 @@ static void dispatch_incoming(uint8_t rx_channel, const uint8_t word[4])
     default:
         break;
     }
-}
-
-static void update_selftest(void)
-{
-    if (mfpu.ready) {
-        return;
-    }
-
-    if (selftest_elapsed_ms < SELFTEST_MS) {
-        return;
-    }
-
-    /*
-     * В текущем code2 нет API, возвращающего результат аппаратной
-     * самопроверки/вычисленный CRC. Поэтому здесь успешное завершение
-     * самопроверки означает достижение 30 с. Реальные результаты компонентов
-     * должны быть подключены через интеграционные точки выше.
-     */
-    mfpu.healthy = (LOGIC_ILLUMINATION_OK() &&
-                    LOGIC_POWER_OK() &&
-                    LOGIC_ARINC_OK() &&
-                    BacklightGetOperability() &&
-                    KeypadCtrlGetOperability()) ? 1u : 0u;
-    mfpu.ready = mfpu.healthy;
-    selftest_done = 1u;
 }
 
 static void accumulate_uptime(void)
@@ -480,9 +448,7 @@ void Logic_Init(void)
     mfpu.healthy = 0u;
     mfpu.sw_version = SRAMGetSWVersion();
     mfpu.sw_checksum = SRAMGetSWCheckSum();
-    selftest_done = 0u;
 
-    selftest_elapsed_ms = 0u;
     m1_period_elapsed_ms = 0u;
     broadcast_elapsed_ms = 0u;
     uptime_elapsed_ms = 0u;
@@ -517,11 +483,9 @@ void Logic_Process(void)
         dispatch_incoming(channel, word);
     }
 
-    selftest_elapsed_ms += LOGIC_TICK_MS;
     m1_period_elapsed_ms += LOGIC_TICK_MS;
     broadcast_elapsed_ms += LOGIC_TICK_MS;
 
-    update_selftest();
     update_m1_assembly_age();
     update_line_period();
     accumulate_uptime();
