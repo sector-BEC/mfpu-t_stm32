@@ -58,9 +58,7 @@ TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 volatile uint8_t flag_1ms = 0;
-volatile uint8_t flag_10ms = 0;
-volatile uint8_t flag_1000ms = 0;
-uint8_t isFirst = 1;
+volatile uint8_t flag_5ms = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,17 +84,9 @@ void My_SysTick_Handler(void)
 
     flag_1ms = 1;  // Просто подняли флаг
 
-    if (counter >= 10) {
+    if (counter >= 20) {
         counter = 0;
-        flag_10ms = 1;
-    }
-
-    static uint8_t counter2 = 0;
-    counter2++;
-
-    if (counter2 >= 200) {
-    	counter2 = 0;
-    	flag_1000ms = 1;
+        flag_5ms = 1;
     }
 }
 /* USER CODE END 0 */
@@ -169,37 +159,10 @@ int main(void)
     // }
 
     /* СЛОТ 2: Обмен по сети (детерминированная задержка) */
-    if (flag_10ms) {
-      flag_10ms = 0;
+    if (flag_5ms) {
+      flag_5ms = 0;
       Logic_Process();  /* опрос FIFO, диспетчеризация, ретраи, рассылка */
     }
-
-    if(flag_1000ms)
-	{
-    	flag_1000ms = 0;
-    	if(isFirst)
-    	{
-    		isFirst = 0;
-    		SRAMWrite();
-			HAL_Delay(10);
-    	}
-//    	uint8_t result = BL_WORK_FAILURE;
-//		for(uint8_t addr=0; addr < 255; addr++)
-//		{
-//			uint16_t addr8 = addr << 1;
-//			//if (HAL_I2C_IsDeviceReady(backlightHi2c2, BH1750_ADDR, 2, 10) == HAL_OK)
-//			if (HAL_I2C_IsDeviceReady(&hi2c1, addr, 2, 10) == HAL_OK)
-//			{
-//				result = BL_WORK_OK;
-//			}
-//			else
-//			{
-//				result = BL_WORK_FAILURE;
-//			}
-//		}
-		SRAMRead();
-	    BacklightUpdate();
-	}
 
     KeypadCtrlUpdate();
 

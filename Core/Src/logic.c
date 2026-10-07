@@ -1,380 +1,552 @@
 #include "logic.h"
 #include "DriverArinc.h"
 #include "arinc_words.h"
-#include <string.h>
 #include "Backlight.h"
 #include "KeypadCtrl.h"
 #include "SRAM.h"
-#include "Transfer.h"
+#include <string.h>
 
-/* =====================================================================
- * Маппинг линий связи ЛС1-6 (см. п.1 ПИВ) на каналы HI-3220.
- * ===================================================================== */
-#define RX_CH_MFI_LEFT   0u   /* ЛС1: приём от левого МФИ-12Т */
-#define RX_CH_MFI_RIGHT  1u   /* ЛС2: приём от правого МФИ-12Т */
-#define RX_CH_PUI        2u   /* ЛС3: приём от ПУИ-Т */
-#define TX_CH_MFI_LEFT   0u   /* ЛС4: передача в левый МФИ-12Т */
-#define TX_CH_MFI_RIGHT  1u   /* ЛС5: передача в правый МФИ-12Т */
-#define TX_CH_PUI        2u   /* ЛС6: передача в ПУИ-Т */
+/*
+ * Logic_Process() должен вызываться каждые 5 мс.
+ * В режиме "работа" М2 формируется раз в 50 мс, в "тест-контроль" — раз в 5 мс.
+ */
+#define LOGIC_TICK_MS              5u
+#define WORK_PERIOD_MS             50u
+#define TEST_PERIOD_MS              5u
+#define M1_PERIOD_MS               50u
+#define SELFTEST_MS                30000u
+#define LINE_MISS_LIMIT             3u
+#define KEY_SEND_LIMIT              5u
+#define UPTIME_UNIT_MS           60000u
+#define UPTIME_MAX_MINUTES    1048575u
 
-#define RX_QUEUE_SIZE       64u
-#define TX_QUEUE_SIZE       16u
-#define MAX_WORDS_PER_POLL  4u
+#define RX_CH_LS1                   0u
+#define RX_CH_LS2                   1u
+#define TX_CH_LS3                   0u
+#define TX_CH_LS4                   1u
+#define RX_QUEUE_SIZE              64u
+#define TX_QUEUE_SIZE              32u
+#define MAX_WORDS_PER_POLL          8u
 
-#define SELFTEST_MS         15000u  /* самопроверка не более 15с (п.1) */
-#define WORK_BROADCAST_MS   200u    /* 5 Гц, режим "работа" */
-#define TEST_BROADCAST_MS   100u    /* 10 Гц, режим "тест-контроль" */
-#define RETRY_INTERVAL_MS   40u     /* повтор msg1 каждые 40±5мс */
-#define RETRY_MAX_COUNT     5u      /* не более 5 повторов (п.1.2.4) */
-#define UPTIME_UNIT_MS      180000u /* 1 единица наработки = 3 мин (табл.13) */
-#define PROC_PERIOD_MS      10u     /* Logic_Process вызывается каждые 10мс */
-#define UPTIME_MAX_UNITS    0x3FFFFu /* максимальное время наработки = 262143 * 3 = 786429 минут = 13107.15 часов*/
+typedef enum {
+    OPMODE_WORK = 0,
+    OPMODE_TEST_CONTROL = 1
+} OpMode;
 
-typedef enum { OPMODE_WORK = 0, OPMODE_TEST_CONTROL = 1 } OpMode;
+typedef struct {
+    bool su1_valid;
+    bool sd1_valid;
+    ArincSu1 su1;
+    ArincSd1 sd1;
+} M1Assembly;
 
-/* ---------------------------------------------------------------------
- * Очереди сырых 4-байтовых ARINC-слов (аналог исходного logic.c,
- * с исправлением опечатки rx_quque/tx_quque и добавлением memcpy/memset).
- * --------------------------------------------------------------------- */
+typedef struct {
+    OpMode mode;
+    uint8_t ready;
+    uint8_t healthy;
+    uint8_t sw_version;
+    uint16_t sw_checksum;
+} MfpuState;
+
+typedef struct {
+    uint8_t pending;
+    uint8_t key_code;
+    uint8_t key_id;
+    uint8_t periods_sent;
+} KeyTransfer;
+
 static struct {
-    uint8_t  channel[RX_QUEUE_SIZE];
-    uint8_t  word[RX_QUEUE_SIZE][4];
-    uint16_t head, tail;
+    uint8_t channel[RX_QUEUE_SIZE];
+    uint8_t word[RX_QUEUE_SIZE][4];
+    uint16_t head;
+    uint16_t tail;
 } rx_queue = {0};
 
 static struct {
-    uint8_t  channel[TX_QUEUE_SIZE];
-    uint8_t  word[TX_QUEUE_SIZE][4];
-    uint16_t head, tail;
+    uint8_t channel[TX_QUEUE_SIZE];
+    uint8_t word[TX_QUEUE_SIZE][4];
+    uint16_t head;
+    uint16_t tail;
 } tx_queue = {0};
 
-static bool queue_push(uint8_t *qch, uint8_t qw[][4], uint16_t *head, uint16_t *tail,
-                        uint16_t size, uint8_t ch, const uint8_t *word)
+static MfpuState mfpu;
+static M1Assembly m1[2] = {0};
+static uint8_t line_miss_count[2] = {0};
+static uint8_t line_seen[2] = {0};
+static uint8_t m1_assembly_age[2] = {0};
+static uint8_t selftest_done;
+static KeyTransfer key_transfer = {0};
+
+static uint32_t selftest_elapsed_ms;
+static uint32_t m1_period_elapsed_ms;
+static uint32_t broadcast_elapsed_ms;
+static uint32_t uptime_elapsed_ms;
+
+/*
+ * Пока заглушки, нужно, чтобы Иван реализовал функции эти
+ */
+#ifndef LOGIC_ILLUMINATION_OK
+#define LOGIC_ILLUMINATION_OK()       (1u)
+#endif
+#ifndef LOGIC_POWER_OK
+#define LOGIC_POWER_OK()              (1u)
+#endif
+#ifndef LOGIC_ARINC_OK
+#define LOGIC_ARINC_OK()              (1u)
+#endif
+#ifndef LOGIC_3V3_CENTI_VOLT
+#define LOGIC_3V3_CENTI_VOLT()        (330u)
+#endif
+#ifndef LOGIC_5V_CENTI_VOLT
+#define LOGIC_5V_CENTI_VOLT()         (500u)
+#endif
+
+static bool queue_push(uint8_t *qch,
+                       uint8_t qword[][4],
+                       uint16_t *head,
+                       uint16_t *tail,
+                       uint16_t size,
+                       uint8_t channel,
+                       const uint8_t word[4])
 {
     uint16_t next = (uint16_t)((*head + 1u) % size);
-    if (next == *tail) return false; /* переполнение */
-    qch[*head] = ch;
-    memcpy(qw[*head], word, 4);
+    if (next == *tail) {
+        return false;
+    }
+
+    qch[*head] = channel;
+    memcpy(qword[*head], word, 4u);
     *head = next;
     return true;
 }
 
-static bool queue_pop(uint8_t *qch, uint8_t qw[][4], uint16_t *head, uint16_t *tail,
-                       uint16_t size, uint8_t *ch, uint8_t *word)
+static bool queue_pop(uint8_t *qch,
+                      uint8_t qword[][4],
+                      uint16_t *head,
+                      uint16_t *tail,
+                      uint16_t size,
+                      uint8_t *channel,
+                      uint8_t word[4])
 {
-    if (*head == *tail) return false; /* пусто */
-    *ch = qch[*tail];
-    memcpy(word, qw[*tail], 4);
+    if (*head == *tail) {
+        return false;
+    }
+
+    *channel = qch[*tail];
+    memcpy(word, qword[*tail], 4u);
     *tail = (uint16_t)((*tail + 1u) % size);
     return true;
 }
 
 static void rx_callback(uint8_t channel, const uint8_t *word)
 {
-    queue_push(rx_queue.channel, rx_queue.word, &rx_queue.head, &rx_queue.tail,
-               RX_QUEUE_SIZE, channel, word);
+    (void)queue_push(rx_queue.channel,
+                     rx_queue.word,
+                     &rx_queue.head,
+                     &rx_queue.tail,
+                     RX_QUEUE_SIZE,
+                     channel,
+                     word);
 }
 
-/* ---------------------------------------------------------------------
- * Состояние изделия МФПУ-Т
- * --------------------------------------------------------------------- */
-typedef struct {
-    OpMode   mode;
-    uint8_t  ready;          /* признак готовности (табл.11/21) */
-    uint8_t  healthy;        /* признак исправности изделия */
-    uint8_t  sw_version;     /* номер версии ПО, 0..127 */
-    uint16_t sw_checksum;    /* CRC-16-CCITT прошивки, см. TODO в Logic_Init */
-} MfpuState;
-
-static MfpuState mfpuState = {0};
-
-/* ---------------------------------------------------------------------
- * Таймеры (обновляются: 1мс-поле -- в Logic_Tick1ms, 10мс-поля -- в
- * Logic_Process, т.к. именно там детерминированно тикает обмен по сети).
- * --------------------------------------------------------------------- */
-static volatile uint32_t selftest_timer_ms  = 0;
-static uint32_t broadcast_timer_ms = 0;
-static uint32_t uptime_accum_ms    = 0;
-
-/* ---------------------------------------------------------------------
- * Вспомогательные функции маппинга
- * --------------------------------------------------------------------- */
-static int device_to_tx_channel(uint8_t device_id)
+static void send_word(uint8_t channel, const uint8_t word[4])
 {
-    switch (device_id) {
-        case ID_MFI_LEFT:  return (int)TX_CH_MFI_LEFT;
-        case ID_MFI_RIGHT: return (int)TX_CH_MFI_RIGHT;
-        case ID_PUI:       return (int)TX_CH_PUI;
-        default:           return -1; /* неизвестный/некорректный отправитель */
+    (void)queue_push(tx_queue.channel,
+                     tx_queue.word,
+                     &tx_queue.head,
+                     &tx_queue.tail,
+                     TX_QUEUE_SIZE,
+                     channel,
+                     word);
+}
+
+static ArincMatrix normal_or_fault_matrix(void)
+{
+    /* Во время начальной самопроверки ISS2 требует матрицу "Нормальная работа". */
+    if (!selftest_done) {
+        return ARINC_MATRIX_NORMAL;
+    }
+    return mfpu.healthy ? ARINC_MATRIX_NORMAL : ARINC_MATRIX_FAULT;
+}
+
+
+static void update_m1_assembly_age(void)
+{
+    for (uint8_t i = 0u; i < 2u; ++i) {
+        if (m1[i].su1_valid || m1[i].sd1_valid) {
+            if (m1_assembly_age[i] < M1_PERIOD_MS) {
+                m1_assembly_age[i] += LOGIC_TICK_MS;
+            }
+            if (m1_assembly_age[i] >= M1_PERIOD_MS) {
+                m1[i].su1_valid = false;
+                m1[i].sd1_valid = false;
+                m1_assembly_age[i] = 0u;
+            }
+        } else {
+            m1_assembly_age[i] = 0u;
+        }
     }
 }
 
-/* Итоговая матрица состояния для всех исходящих слов, с учётом приоритета */
-static MatrixStatus current_matrix(void)
+static void update_line_period(void)
 {
-    bool fault    = (mfpuState.healthy == 0);
-    bool no_data  = (mfpuState.ready == 0);
-    bool testmode = (mfpuState.mode == OPMODE_TEST_CONTROL);
-    return ARINC_ResolveMatrix(fault, no_data, testmode);
+    if (m1_period_elapsed_ms < M1_PERIOD_MS) {
+        return;
+    }
+
+    m1_period_elapsed_ms -= M1_PERIOD_MS;
+
+    for (uint8_t i = 0u; i < 2u; ++i) {
+        if (line_seen[i]) {
+            line_seen[i] = 0u;
+            line_miss_count[i] = 0u;
+        } else if (line_miss_count[i] < LINE_MISS_LIMIT) {
+            ++line_miss_count[i];
+        }
+    }
 }
 
-/* Постановка слова в исходящую очередь (реальная отправка по SPI -- в
- * Logic_Process, чтобы всё общение с HI-3220 было в одном детерминированном
- * по времени слоте, как того требует принятая архитектура main.c). */
-static void send_word(uint8_t tx_channel, const uint8_t word[4])
+static bool ls1_ok(void)
 {
-    queue_push(tx_queue.channel, tx_queue.word, &tx_queue.head, &tx_queue.tail,
-               TX_QUEUE_SIZE, tx_channel, word);
+    return line_miss_count[0] < LINE_MISS_LIMIT;
 }
 
-/* =====================================================================
- * Обработка входящих сообщений
- * ===================================================================== */
-
-static void handle_msg6(const uint8_t word[4])
+static bool ls2_ok(void)
 {
-    Msg6_KeyboardBacklight message6;
-    bool ok = ARINC_ParseMsg6(word, &message6);
+    return line_miss_count[1] < LINE_MISS_LIMIT;
+}
 
-    /* Смена режима "работа"<->"тест-контроль" обрабатывается всегда,
-     * даже находясь в тест-контроле (п.1.3.2: "выполняет обработку только
-     * команды на изменение режима работы"). */
-    if (ok) {
-        if (message6.test_control) {
-            mfpuState.mode = OPMODE_TEST_CONTROL;
+static void process_m1_array(uint8_t rx_channel)
+{
+    M1Assembly *a;
+    uint8_t line_index;
+
+    if (rx_channel == RX_CH_LS1) {
+        a = &m1[0];
+        line_index = 0u;
+    } else if (rx_channel == RX_CH_LS2) {
+        a = &m1[1];
+        line_index = 1u;
+    } else {
+        return;
+    }
+
+    if (!a->su1_valid || !a->sd1_valid) {
+        return;
+    }
+
+    /* Оба слова должны иметь нормальную матрицу. */
+    if (a->su1.matrix != ARINC_MATRIX_NORMAL ||
+        a->sd1.matrix != ARINC_MATRIX_NORMAL) {
+        a->su1_valid = false;
+        a->sd1_valid = false;
+        return;
+    }
+
+    /* Достоверный М1 получен — линия считается исправной. */
+    line_seen[line_index] = 1u;
+    m1_assembly_age[line_index] = 0u;
+
+    if (mfpu.mode == OPMODE_TEST_CONTROL) {
+        /* В тест-контроле обрабатывается только разряд 9 СУ1. */
+        mfpu.mode = a->su1.mode ? OPMODE_TEST_CONTROL : OPMODE_WORK;
+    } else {
+        /* В режиме "работа" обрабатываются режим, подсветка и её уровень. */
+        mfpu.mode = a->su1.mode ? OPMODE_TEST_CONTROL : OPMODE_WORK;
+
+        if (a->su1.backlight_auto) {
+            BacklightSetMode(a->su1.backlight_auto);
         } else {
-            mfpuState.mode = OPMODE_WORK;
+            BacklightSetMode(a->su1.backlight_auto);
+            BacklightSetLightLevel(a->su1.brightness);
+        }
+
+        /* СД1 подтверждает событие клавиши только при полном совпадении. */
+        if (key_transfer.pending &&
+            a->sd1.key_code == key_transfer.key_code &&
+            a->sd1.key_id == key_transfer.key_id) {
+            key_transfer.pending = 0u;
+            key_transfer.periods_sent = 0u;
         }
     }
 
-    /* Команда яркости подсветки -- только в режиме "работа" */
-    if (ok && mfpuState.mode == OPMODE_WORK) {
-		BacklightSetMode(message6.auto_mode);
-        if (message6.auto_mode != BL_AUTO_OPERATION_MODE) {
-			BacklightSetLightLevel(message6.brightness);
-        } else {
-			//Нет необходимости
-		}
-        /* при backlight_auto==1 уровень подсветки вычисляется отдельным
-         * алгоритмом по датчику освещённости -- не описан в ПИВ (TODO)
-         * вызывать алгоритм Ивана45 каждый раз при вызове Logic_Process, если автоподсветка == 1*/
-    }
-
-    int tx_ch = device_to_tx_channel(message6.sender);
-    if (tx_ch >= 0) {
-        uint8_t ack[4];
-        if (ok)
-        {
-            ARINC_BuildMsg8(message6.sender, (uint8_t)ID_MFPU, XFER_OK, current_matrix(), ack);    
-        } else {
-            ARINC_BuildMsg8(message6.sender, (uint8_t)ID_MFPU, XFER_ERROR, current_matrix(), ack);
-        }
-        send_word((uint8_t)tx_ch, ack);
-    }
-}
-
-static void handle_msg7(const uint8_t word[4])
-{
-    Msg7_SelectLine message7;
-    bool ok = ARINC_ParseMsg7(word, &message7);
-
-    /* "Обработка сообщений №8 не выполняется в режиме тест-контроль" (п.1.3.2) */
-    if (ok && mfpuState.mode == OPMODE_WORK) {
-        TransferSetActiveLine(message7.active_line);
-    }
-
-    int tx_ch = device_to_tx_channel(message7.sender);
-    if (tx_ch >= 0) {
-        uint8_t ack[4];
-        ARINC_BuildMsg8(message7.sender, (uint8_t)ID_MFPU, ok ? XFER_OK : XFER_ERROR, current_matrix(), ack);
-        send_word((uint8_t)tx_ch, ack);
-    }
-}
-
-static void handle_msg8(const uint8_t word[4])
-{
-    Msg8_Ack message8;
-    if (!ARINC_ParseMsg8(word, &message8)) return; /* некорректный формат -- игнор */
-    if (!TransferIsPending()) return;       /* мы ничего не ждём -- игнор */
-
-    int from_ch = device_to_tx_channel(message8.sender);
-    if (from_ch != (int)TransferGetPendingChannel()) return; /* ack не от того МФИ */
-
-    /* И успех, и ошибка формата снимают наше ожидание: повторная отправка
-     * того же слова не исправит ошибку формата на приёмной стороне.
-     * Если требуется другая трактовка XFER_ERROR -- уточнить. */
-    TransferSetPending(false);
+    a->su1_valid = false;
+    a->sd1_valid = false;
 }
 
 static void dispatch_incoming(uint8_t rx_channel, const uint8_t word[4])
 {
-    (void)rx_channel;
-    switch (word[0] /* адрес/метка */) {
-        case ADDR_MSG6: handle_msg6(word); break;
-        case ADDR_MSG7: handle_msg7(word); break;
-        case ADDR_MSG8: handle_msg8(word); break;
-        default:
-            /* Прочие метки для МФПУ-Т не определены как входящие -- игнор.
-             * Проверка чётности выполняется аппаратно HI-3220 (RXCn.PARITYEN),
-             * проверка идентификатора получателя (Broadcast/МФПУ-Т) здесь
-             * не выполняется отдельно, т.к. в шаблонном случае каналы и так
-             * содержат только адресованный МФПУ-Т трафик. */
-            break;
+    uint8_t address = word[0];
+
+    if (rx_channel != RX_CH_LS1 && rx_channel != RX_CH_LS2) {
+        return;
+    }
+
+    switch (address) {
+    case ARINC_ADDR_SU1:
+        if (ARINC_ParseSu1(word, &m1[rx_channel].su1)) {
+            m1[rx_channel].su1_valid = true;
+            process_m1_array(rx_channel);
+        } else {
+            m1[rx_channel].su1_valid = false;
+            m1[rx_channel].sd1_valid = false;
+        }
+        break;
+
+    case ARINC_ADDR_SD1:
+        if (ARINC_ParseSd1(word, &m1[rx_channel].sd1)) {
+            m1[rx_channel].sd1_valid = true;
+            process_m1_array(rx_channel);
+        } else {
+            m1[rx_channel].su1_valid = false;
+            m1[rx_channel].sd1_valid = false;
+        }
+        break;
+
+    default:
+        break;
     }
 }
 
-/* Учёт времени наработки МФПУ*/
+static void update_selftest(void)
+{
+    if (mfpu.ready) {
+        return;
+    }
+
+    if (selftest_elapsed_ms < SELFTEST_MS) {
+        return;
+    }
+
+    /*
+     * В текущем code2 нет API, возвращающего результат аппаратной
+     * самопроверки/вычисленный CRC. Поэтому здесь успешное завершение
+     * самопроверки означает достижение 30 с. Реальные результаты компонентов
+     * должны быть подключены через интеграционные точки выше.
+     */
+    mfpu.healthy = (LOGIC_ILLUMINATION_OK() &&
+                    LOGIC_POWER_OK() &&
+                    LOGIC_ARINC_OK() &&
+                    BacklightGetOperability() &&
+                    KeypadCtrlGetOperability()) ? 1u : 0u;
+    mfpu.ready = mfpu.healthy;
+    selftest_done = 1u;
+}
+
 static void accumulate_uptime(void)
 {
-    /*
-    Каждые 3 минуты значиене GetWorkTimeSRAM() увеличивается на единицу.
-    Согласно табл. 13 максимальное значение - 262143, что соответствует 0x3FFFF, в часах 13000+
-    */
-    uptime_accum_ms += PROC_PERIOD_MS;
-    if (uptime_accum_ms >= UPTIME_UNIT_MS) {
-        uptime_accum_ms -= UPTIME_UNIT_MS;
-        if (SRAMGetWorkTimeSRAM() < UPTIME_MAX_UNITS) {
-			SRAMSetWorkTimeSRAM(SRAMGetWorkTimeSRAM()+1);
+    uptime_elapsed_ms += LOGIC_TICK_MS;
+
+    if (uptime_elapsed_ms >= UPTIME_UNIT_MS) {
+        uptime_elapsed_ms -= UPTIME_UNIT_MS;
+
+        uint32_t minutes = SRAMGetWorkTimeSRAM();
+        if (minutes < UPTIME_MAX_MINUTES) {
+            SRAMSetWorkTimeSRAM(minutes + 1u);
         }
     }
 }
 
-/* =====================================================================
- * Периодическая широковещательная рассылка
- * (msg2,4,5,3 -- режим "работа" 5Гц; msg2,4,5,9 -- "тест-контроль" 10Гц)
- * Сообщения массива рассылаются по одному за вызов Logic_Process, чтобы
- * разнести их внутри периода (конкретный тайминг РТМ 1495-75 в
- * ПИВ не приведён -- при необходимости скорректировать очередность/паузы).
- * ===================================================================== */
-static void send_next_broadcast_word(void)
+static void build_and_send_m2(void)
 {
     uint8_t word[4];
-    bool test_mode = (mfpuState.mode == OPMODE_TEST_CONTROL);
+    bool healthy = (mfpu.healthy != 0u);
+    bool illum_ok = (LOGIC_ILLUMINATION_OK() != 0u);
+    bool backlight_ok = (BacklightGetOperability() != 0u);
+    ArincMatrix state_matrix = healthy ? ARINC_MATRIX_NORMAL : ARINC_MATRIX_FAULT;
 
     KeypadCtrlUpdate();
-	BacklightUpdate();
+    BacklightUpdate();
 
-    /* msg2 */
-    ARINC_BuildMsg2(KeypadCtrlGetLanguage(), BacklightGetMode(), BacklightGetLightLevel(),
-                                BacklightGetBrightness(), current_matrix(), word);
-    send_word(TX_CH_MFI_LEFT, word);
-    send_word(TX_CH_MFI_RIGHT, word);
+    /* СС1 — К, при отказе изделия матрица "Отказ". */
+    ARINC_BuildSs1(mfpu.ready,
+                   KeypadCtrlGetLanguage(),
+                   mfpu.sw_version,
+                   ls1_ok(),
+                   ls2_ok(),
+                   state_matrix,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
 
-    /* msg4 */
-    ARINC_BuildMsg4(SRAMGetWorkTimeSRAM(), current_matrix(), word);
-    send_word(TX_CH_MFI_LEFT, word);
-    send_word(TX_CH_MFI_RIGHT, word);
+    /* СД2: при неисправности датчика/контроллера — "Нет вычисленных данных". */
+    ArincMatrix sd2_matrix = (illum_ok && backlight_ok)
+                           ? ARINC_MATRIX_NORMAL
+                           : ARINC_MATRIX_NO_DATA;
+    ARINC_BuildSd2(BacklightGetMode(),
+                   BacklightGetLightLevel(),
+                   BacklightGetBrightness(),
+                   sd2_matrix,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
 
-    /* msg5 */
-    ARINC_BuildMsg5(mfpuState.sw_checksum, current_matrix(), word);
-    send_word(TX_CH_MFI_LEFT, word);
-    send_word(TX_CH_MFI_RIGHT, word);
+    /* СД3 — ДК, наработка в минутах. */
+    ARINC_BuildSd3(SRAMGetWorkTimeSRAM(),
+                   ARINC_MATRIX_NORMAL,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
 
-    /* msg3 или msg9 */
-    if (test_mode)
-    {
-		ARINC_BuildMsg9(mfpuState.ready, mfpuState.healthy, 1u, mfpuState.sw_version, TransferGetActiveLine(),
-						  BacklightGetOperability(), KeypadCtrlGetOperability(), BacklightGetOperability(),
-						  current_matrix(), word);
-	} else {
-		ARINC_BuildMsg3(mfpuState.ready, mfpuState.healthy, 0u, mfpuState.sw_version, TransferGetActiveLine(),
-						 current_matrix(), word);
-	}
-    send_word(TX_CH_MFI_LEFT, word);
-    send_word(TX_CH_MFI_RIGHT, word);
+    /* СД4 — ДК, CRC-16-CCITT, нормальная матрица. */
+    ARINC_BuildSd4(mfpu.sw_checksum,
+                   ARINC_MATRIX_NORMAL,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
 
-    /* Broadcast (id=7) адресован обоим МФИ-12Т сразу -- HI-3220 не
-     * дублирует данные между Tx-каналами автоматически, поэтому одно и то
-     * же слово ставится в очередь на оба канала (ЛС4 и ЛС5). */
+    /* СД5 — К. Без события: 0/0 + "Нет вычисленных данных". */
+    if (key_transfer.pending) {
+        ARINC_BuildSd5(key_transfer.key_code,
+                       key_transfer.key_id,
+                       ARINC_MATRIX_NORMAL,
+                       word);
+
+        ++key_transfer.periods_sent;
+        if (key_transfer.periods_sent >= KEY_SEND_LIMIT) {
+            key_transfer.pending = 0u;
+            key_transfer.periods_sent = 0u;
+        }
+    } else {
+        ARINC_BuildSd5(0u,
+                       0u,
+                       ARINC_MATRIX_NO_DATA,
+                       word);
+    }
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
 }
 
-/* =====================================================================
- * Публичный API
- * ===================================================================== */
+static void build_and_send_m3(void)
+{
+    uint8_t word[4];
+    bool illum_ok = (LOGIC_ILLUMINATION_OK() != 0u);
+    bool backlight_ok = (BacklightGetOperability() != 0u);
+    bool keypad_ok = (KeypadCtrlGetOperability() != 0u);
+    bool power_ok = (LOGIC_POWER_OK() != 0u);
+    bool arinc_ok = (LOGIC_ARINC_OK() != 0u);
+    bool healthy = backlight_ok && keypad_ok && illum_ok && power_ok && arinc_ok;
+    ArincMatrix matrix = healthy ? ARINC_MATRIX_NORMAL : ARINC_MATRIX_FAULT;
+
+    KeypadCtrlUpdate();
+    BacklightUpdate();
+
+    ARINC_BuildSs2(KeypadCtrlGetLanguage(),
+                   mfpu.sw_version,
+                   backlight_ok,
+                   keypad_ok,
+                   illum_ok,
+                   power_ok,
+                   arinc_ok,
+                   ls1_ok(),
+                   ls2_ok(),
+                   matrix,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
+
+    /* При неисправности датчика/контроллера SD2 должен быть "нет данных". */
+    ArincMatrix sd2_matrix = (illum_ok && backlight_ok)
+                           ? ARINC_MATRIX_NORMAL
+                           : ARINC_MATRIX_NO_DATA;
+    ARINC_BuildSd2(BacklightGetMode(),
+                   BacklightGetLightLevel(),
+                   BacklightGetBrightness(),
+                   sd2_matrix,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
+
+    ARINC_BuildSd3(SRAMGetWorkTimeSRAM(), ARINC_MATRIX_NORMAL, word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
+
+    ARINC_BuildSd4(mfpu.sw_checksum, ARINC_MATRIX_NORMAL, word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
+
+    ARINC_BuildSd6((uint16_t)LOGIC_3V3_CENTI_VOLT(),
+                   (uint16_t)LOGIC_5V_CENTI_VOLT(),
+                   ARINC_MATRIX_NORMAL,
+                   word);
+    send_word(TX_CH_LS3, word);
+    send_word(TX_CH_LS4, word);
+}
 
 void Logic_Init(void)
 {
-    mfpuState.mode        = OPMODE_WORK;
-    mfpuState.ready       = 0;  /* поднимется по завершении самопроверки */
-    mfpuState.healthy     = 0;
-    mfpuState.sw_version  = SRAMGetSWVersion();
-    mfpuState.sw_checksum = SRAMGetSWCheckSum();
+    mfpu.mode = OPMODE_WORK;
+    mfpu.ready = 0u;
+    mfpu.healthy = 0u;
+    mfpu.sw_version = SRAMGetSWVersion();
+    mfpu.sw_checksum = SRAMGetSWCheckSum();
+    selftest_done = 0u;
 
-    selftest_timer_ms  = 0;
-    broadcast_timer_ms = 0;
-    uptime_accum_ms    = 0;
-
-    /* ВАЖНО: для точного соответствия протоколу нужно поправить
-     * конфигурацию HI-3220 в Init_Holt() (DriverArinc.c):
-     *  - HI3220_RxConfig.parity_en  = 1  (бит32 станет флагом чётности)
-     *  - HI3220_TxConfig.parity_en  = 1, even_odd = 0  (нечётная чётность
-     *    вставляется аппаратно -- этот модуль бит32 не считает)
-     * Каналы 0/1/2 используются как ЛС1/ЛС2/ЛС3 (Rx) и ЛС4/ЛС5/ЛС6 (Tx). */
+    selftest_elapsed_ms = 0u;
+    m1_period_elapsed_ms = 0u;
+    broadcast_elapsed_ms = 0u;
+    uptime_elapsed_ms = 0u;
 }
 
-/*
-void Logic_Tick1ms(void)
+void Logic_KeyPressed(uint8_t key_code)
 {
-    /* Самопроверка при включении: длится не более 15с, пока не завершится
-     * ready=0 (значит и признак готовности в сообщении №4/10 -- "0"). *
-    if (!mfpuState.ready) {
-        selftest_timer_ms++;
-        if (selftest_timer_ms >= SELFTEST_MS) {
-            /* TODO: заменить на реальную проверку CRC ПО (сравнение с
-             * sw_checksum) и опрос исправности узлов (подсветка,
-             * контроллер клавиатуры, датчик освещённости). *
-            mfpuState.healthy = 1;
-            mfpuState.ready   = 1;
-        }
+    /* ISS2: в режиме тест-контроль нажатия клавиш не обрабатываются. */
+    if (mfpu.mode == OPMODE_TEST_CONTROL || !mfpu.ready) {
+        return;
     }
 
-    /* TODO: неблокирующее сканирование матрицы клавиатуры должно быть
-     * здесь (короткий, детерминированный по времени слот, <=500мкс).
-     * При обнаружении события вызывать Logic_KeyEvent(code).
-     * HI-3220 передаёт только уже сформированные ARINC-слова. *
+    ++key_transfer.key_id; /* uint8_t: 255 -> 0 */
+    key_transfer.key_code = key_code;
+    key_transfer.pending = 1u;
+    key_transfer.periods_sent = 0u;
 }
-*/
 
 void Logic_Process(void)
 {
-    /* 1. Опрос приёмных FIFO HI-3220, слова складываются в rx_queue */
     DriverArinc_PollRxFifos(rx_callback, MAX_WORDS_PER_POLL);
 
-    /* 2. Диспетчеризация всех полученных слов */
-    uint8_t ch, word[4];
-    while (queue_pop(rx_queue.channel, rx_queue.word, &rx_queue.head, &rx_queue.tail,
-                     RX_QUEUE_SIZE, &ch, word)) {
-        dispatch_incoming(ch, word);
+    uint8_t channel;
+    uint8_t word[4];
+    while (queue_pop(rx_queue.channel,
+                     rx_queue.word,
+                     &rx_queue.head,
+                     &rx_queue.tail,
+                     RX_QUEUE_SIZE,
+                     &channel,
+                     word)) {
+        dispatch_incoming(channel, word);
     }
 
-    /* 3. Повтор неподтверждённых сообщений №1 */
-    // process_retry(PROC_PERIOD_MS);
+    selftest_elapsed_ms += LOGIC_TICK_MS;
+    m1_period_elapsed_ms += LOGIC_TICK_MS;
+    broadcast_elapsed_ms += LOGIC_TICK_MS;
 
-    /* 4. Периодическая рассылка: 5Гц ("работа") / 10Гц ("тест-контроль") */
-    uint32_t period = (mfpuState.mode == OPMODE_TEST_CONTROL) ? TEST_BROADCAST_MS
-                                                          : WORK_BROADCAST_MS;
-    broadcast_timer_ms += PROC_PERIOD_MS;
-    if (broadcast_timer_ms >= period) {
-        broadcast_timer_ms -= period;
-        send_next_broadcast_word();
-    }
-
-    /* 5. Учёт наработки (единица -- 3 минуты, табл.14) */
+    update_selftest();
+    update_m1_assembly_age();
+    update_line_period();
     accumulate_uptime();
 
-    /* 6. Реальная отправка накопленной исходящей очереди по SPI.
-     *    Всё обращение к HI-3220 сосредоточено в этом детерминированном
-     *    по времени слоте (вызывается каждые 10мс из main.c). */
-    uint8_t tx_ch, tx_word[4];
-    while (
-    		queue_pop(tx_queue.channel,
-    				tx_queue.word,
-					&tx_queue.head,
-					&tx_queue.tail,
-					TX_QUEUE_SIZE,
-					&tx_ch,
-					tx_word))
-    {
-        DriverArinc_SendImmediate(tx_ch, tx_word);
+    uint32_t period = (mfpu.mode == OPMODE_TEST_CONTROL)
+                    ? TEST_PERIOD_MS
+                    : WORK_PERIOD_MS;
+
+    if (broadcast_elapsed_ms >= period) {
+        broadcast_elapsed_ms -= period;
+
+        if (mfpu.mode == OPMODE_TEST_CONTROL) {
+            build_and_send_m3();
+        } else {
+            build_and_send_m2();
+        }
+    }
+
+    while (queue_pop(tx_queue.channel,
+                     tx_queue.word,
+                     &tx_queue.head,
+                     &tx_queue.tail,
+                     TX_QUEUE_SIZE,
+                     &channel,
+                     word)) {
+        DriverArinc_SendImmediate(channel, word);
     }
 }

@@ -1,170 +1,240 @@
-
 #include "arinc_words.h"
-#include <stdio.h>
+#include <stddef.h>
 
-/* ---------------------------------------------------------------------
- * Низкий уровень
- * --------------------------------------------------------------------- */
-
-void ARINC_PackWord(uint8_t address, uint8_t recipient3, uint32_t data18,
-                     MatrixStatus matrix, uint8_t out[4])
+static uint8_t matrix_to_raw(ArincMatrix matrix, ArincWordType type)
 {
-    out[0] = address;
-    out[1] = (uint8_t)((recipient3 & 0x07) | ((data18 & 0x1F) << 3));
-    out[2] = (uint8_t)((data18 >> 5) & 0xFF);
-    /* бит7 (чётность) оставляем 0 -- вставляется аппаратно HI-3220 при
-     * передаче через TRANSFER_SendImmediate/scheduler, если в TXCn
-     * настроено PARITY/DATA=1. Если слово пишется напрямую в память
-     * (TRANSFER_WriteWord) чётность нужно досчитать отдельно. */
-    out[3] = (uint8_t)(((data18 >> 13) & 0x1F) | ((matrix & 0x03) << 5));
-}
-
-void ARINC_UnpackWord(const uint8_t word[4], uint8_t *address,
-                      uint8_t *recipient3, uint32_t *data18,
-                      MatrixStatus *matrix)
-{
-    if (address)    *address = word[0];
-    if (recipient3) *recipient3 = word[1] & 0x07;
-    if (data18) {
-        uint32_t lo  = (word[1] >> 3) & 0x1F;        /* биты12-16 */
-        uint32_t mid = word[2];                       /* биты17-24 */
-        uint32_t hi  = word[3] & 0x1F;                /* биты25-29 */
-        *data18 = lo | (mid << 5) | (hi << 13);
+    if (type == ARINC_WORD_DK) {
+        switch (matrix) {
+        case ARINC_MATRIX_FAULT:   return 0u; /* 00 */
+        case ARINC_MATRIX_NO_DATA: return 1u; /* 01 */
+        case ARINC_MATRIX_TEST:    return 2u; /* 10 */
+        case ARINC_MATRIX_NORMAL:  return 3u; /* 11 */
+        default:                   return 0u;
+        }
     }
-    if (matrix) *matrix = (MatrixStatus)((word[3] >> 5) & 0x03);
+
+    /* Для К: 00 - норма, 01 - нет данных, 10 - тест, 11 - отказ. */
+    switch (matrix) {
+    case ARINC_MATRIX_FAULT:   return 3u;
+    case ARINC_MATRIX_NO_DATA: return 1u;
+    case ARINC_MATRIX_TEST:    return 2u;
+    case ARINC_MATRIX_NORMAL:  return 0u;
+    default:                   return 0u;
+    }
 }
 
-MatrixStatus ARINC_ResolveMatrix(bool fault, bool no_computed_data, bool test_mode)
+static ArincMatrix raw_to_matrix(uint8_t raw, ArincWordType type)
 {
-    /* Приоритет (высший -> низший): отказ, нет данных, тест, норма (см. п.1.1) */
-    if (fault)            return MATRIX_FAULT;
-    if (no_computed_data) return MATRIX_NO_DATA;
-    if (test_mode)        return MATRIX_TEST;
-    return MATRIX_NORMAL;
+    raw &= 0x03u;
+
+    if (type == ARINC_WORD_DK) {
+        switch (raw) {
+        case 0u: return ARINC_MATRIX_FAULT;
+        case 1u: return ARINC_MATRIX_NO_DATA;
+        case 2u: return ARINC_MATRIX_TEST;
+        case 3u: return ARINC_MATRIX_NORMAL;
+        default: return ARINC_MATRIX_FAULT;
+        }
+    }
+
+    switch (raw) {
+    case 0u: return ARINC_MATRIX_NORMAL;
+    case 1u: return ARINC_MATRIX_NO_DATA;
+    case 2u: return ARINC_MATRIX_TEST;
+    case 3u: return ARINC_MATRIX_FAULT;
+    default: return ARINC_MATRIX_FAULT;
+    }
 }
 
-/* ---------------------------------------------------------------------
- * Сборщики исходящих сообщений
- * --------------------------------------------------------------------- */
-
-void ARINC_BuildKeyMsg(uint8_t recipient, uint8_t key_code,
-                        MatrixStatus matrix, uint8_t out[4])
+void ARINC_PackWord(uint8_t address,
+                    uint32_t data21,
+                    ArincMatrix matrix,
+                    ArincWordType type,
+                    uint8_t out[4])
 {
-    /* табл.8 / табл.9: биты12-19 - код клавиши (8 бит), биты20-29 - резерв(0) */
-    uint32_t data18 = (uint32_t)key_code; /* младшие 8 бит data18 = биты12-19 */
-    ARINC_PackWord(ADDR_MSG1, recipient, data18, matrix, out);
+    uint8_t raw_matrix = matrix_to_raw(matrix, type);
+
+    data21 &= 0x1FFFFFu;
+
+    out[0] = address;
+    out[1] = (uint8_t)(data21 & 0xFFu);             /* bits 9..16 */
+    out[2] = (uint8_t)((data21 >> 8) & 0xFFu);      /* bits 17..24 */
+    out[3] = (uint8_t)(((data21 >> 16) & 0x1Fu) |  /* bits 25..29 */
+                       ((uint8_t)raw_matrix << 5));
+
+    /* bit 32 (out[3] bit 7) формируется HI-3220 при передаче. */
+    out[3] &= 0x7Fu;
 }
 
-void ARINC_BuildMsg2(uint8_t layout_rus, uint8_t backlight_auto,
-                      uint8_t backlight_level, uint8_t illum_level,
-                      MatrixStatus matrix, uint8_t out[4])
+bool ARINC_UnpackWord(const uint8_t word[4],
+                      uint8_t *address,
+                      uint32_t *data21,
+                      ArincMatrix *matrix,
+                      ArincWordType type)
 {
-    /* табл.10: бит12-раскладка(1), бит13-режим подсветки(1),
-     * биты14-21-яркость(8), биты22-29-освещённость(8) */
-    uint32_t data18 = (uint32_t)(layout_rus & 0x1)
-                     | ((uint32_t)(backlight_auto & 0x1) << 1)
-                     | ((uint32_t)backlight_level << 2)
-                     | ((uint32_t)illum_level << 10);
-    ARINC_PackWord(ADDR_MSG2, ID_BROADCAST, data18, matrix, out);
+    if (word == NULL) {
+        return false;
+    }
+
+    if (address != NULL) {
+        *address = word[0];
+    }
+
+    if (data21 != NULL) {
+        *data21 = ((uint32_t)word[1]) |
+                  ((uint32_t)word[2] << 8) |
+                  ((uint32_t)(word[3] & 0x1Fu) << 16);
+    }
+
+    if (matrix != NULL) {
+        *matrix = raw_to_matrix((uint8_t)((word[3] >> 5) & 0x03u), type);
+    }
+
+    return true;
 }
 
-void ARINC_BuildMsg3(uint8_t ready, uint8_t healthy, uint8_t test_mode,
-                      uint8_t sw_version, LineId active_line,
-                      MatrixStatus matrix, uint8_t out[4])
+bool ARINC_ParseSu1(const uint8_t word[4], ArincSu1 *out)
 {
-    /* табл.11: 12-готов,13-исправен,14-режим,15-21-версия(7б),
-     * 22-23-акт.линия(2б),24-29-резерв(0) */
-    uint32_t data18 = (uint32_t)(ready & 0x1)
-                     | ((uint32_t)(healthy & 0x1) << 1)
-                     | ((uint32_t)(test_mode & 0x1) << 2)
-                     | ((uint32_t)(sw_version & 0x7F) << 3)
-                     | ((uint32_t)(active_line & 0x3) << 10);
-    ARINC_PackWord(ADDR_MSG3, ID_BROADCAST, data18, matrix, out);
+    uint8_t address;
+    uint32_t data;
+    ArincMatrix matrix;
+
+    if (out == NULL || !ARINC_UnpackWord(word, &address, &data, &matrix, ARINC_WORD_K)) {
+        return false;
+    }
+
+    if (address != ARINC_ADDR_SU1) {
+        return false;
+    }
+
+    /* bits 19..29 (data bits 10..20) -- резерв, должны быть 0. */
+    if ((data & 0x1FFC00u) != 0u) {
+        return false;
+    }
+
+    out->mode = (uint8_t)(data & 0x01u);
+    out->backlight_auto = (uint8_t)((data >> 1) & 0x01u);
+    out->brightness = (uint8_t)((data >> 2) & 0xFFu);
+    out->matrix = matrix;
+    return true;
 }
 
-void ARINC_BuildMsg4(uint32_t uptime_3min, MatrixStatus matrix, uint8_t out[4])
+bool ARINC_ParseSd1(const uint8_t word[4], ArincSd1 *out)
 {
-    /* табл.13: 12-29 - наработка, 18 бит целиком */
-    ARINC_PackWord(ADDR_MSG4, ID_BROADCAST, uptime_3min & 0x3FFFF, matrix, out);
+    uint8_t address;
+    uint32_t data;
+    ArincMatrix matrix;
+
+    if (out == NULL || !ARINC_UnpackWord(word, &address, &data, &matrix, ARINC_WORD_K)) {
+        return false;
+    }
+
+    if (address != ARINC_ADDR_SD1) {
+        return false;
+    }
+
+    /* bits 25..29 (data bits 16..20) -- резерв, должны быть 0. */
+    if ((data & 0x1F0000u) != 0u) {
+        return false;
+    }
+
+    out->key_code = (uint8_t)(data & 0xFFu);
+    out->key_id = (uint8_t)((data >> 8) & 0xFFu);
+    out->matrix = matrix;
+    return true;
 }
 
-void ARINC_BuildMsg5(uint16_t crc16, MatrixStatus matrix, uint8_t out[4])
+void ARINC_BuildSs1(uint8_t ready,
+                    uint8_t layout_rus,
+                    uint8_t sw_version,
+                    uint8_t ls1_ok,
+                    uint8_t ls2_ok,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    /* табл.14: 12-27 - CRC (16 бит), 28-29 - резерв(0) */
-    ARINC_PackWord(ADDR_MSG5, ID_BROADCAST, (uint32_t)crc16, matrix, out);
+    uint32_t data = ((uint32_t)(ready & 0x01u)) |
+                    ((uint32_t)(layout_rus & 0x01u) << 1) |
+                    ((uint32_t)sw_version << 2) |
+                    ((uint32_t)(ls1_ok & 0x01u) << 10) |
+                    ((uint32_t)(ls2_ok & 0x01u) << 11);
+
+    ARINC_PackWord(ARINC_ADDR_SS1, data, matrix, ARINC_WORD_K, out);
 }
 
-void ARINC_BuildMsg8(uint8_t recipient, uint8_t sender, XferStatus status,
-                      MatrixStatus matrix, uint8_t out[4])
+void ARINC_BuildSd2(uint8_t backlight_auto,
+                    uint8_t backlight_level,
+                    uint8_t illumination_level,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    /* табл.17: 12-14-отправитель(3б),15-16-статус(2б),17-29-резерв(0) */
-    uint32_t data18 = (uint32_t)(sender & 0x07)
-                     | ((uint32_t)(status & 0x03) << 3);
-    ARINC_PackWord(ADDR_MSG8, recipient, data18, matrix, out);
+    uint32_t data = ((uint32_t)(backlight_auto & 0x01u)) |
+                    ((uint32_t)backlight_level << 1) |
+                    ((uint32_t)illumination_level << 9);
+
+    ARINC_PackWord(ARINC_ADDR_SD2, data, matrix, ARINC_WORD_K, out);
 }
 
-void ARINC_BuildMsg9(uint8_t ready, uint8_t healthy, uint8_t test_mode,
-                       uint8_t sw_version, LineId active_line,
-                       uint8_t backlight_ok, uint8_t keypad_ok, uint8_t illum_ok,
-                       MatrixStatus matrix, uint8_t out[4])
+void ARINC_BuildSd3(uint32_t uptime_minutes,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    /* табл.21 */
-    uint32_t data18 = (uint32_t)(ready & 0x1)
-                     | ((uint32_t)(healthy & 0x1) << 1)
-                     | ((uint32_t)(test_mode & 0x1) << 2)
-                     | ((uint32_t)(sw_version & 0x7F) << 3)
-                     | ((uint32_t)(active_line & 0x3) << 10)
-                     | ((uint32_t)(backlight_ok & 0x1) << 12)
-                     | ((uint32_t)(keypad_ok & 0x1) << 13)
-                     | ((uint32_t)(illum_ok & 0x1) << 14);
-    ARINC_PackWord(ADDR_MSG9, ID_BROADCAST, data18, matrix, out);
+    /* bits 9..28 = 20-bit uptime, bit 29 (sign) = 0. */
+    uint32_t data = uptime_minutes & 0x000FFFFFu;
+    ARINC_PackWord(ARINC_ADDR_SD3, data, matrix, ARINC_WORD_DK, out);
 }
 
-/* ---------------------------------------------------------------------
- * Разборщики входящих сообщений
- * --------------------------------------------------------------------- */
-
-bool ARINC_ParseMsg6(const uint8_t word[4], Msg6_KeyboardBacklight *out)
+void ARINC_BuildSd4(uint16_t crc16,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    uint8_t recipient; uint32_t data18; MatrixStatus matrix;
-    ARINC_UnpackWord(word, NULL, &recipient, &data18, &matrix);
-
-    out->recipient    = recipient;
-    out->sender       = (uint8_t)(data18 & 0x07);
-    out->auto_mode    = (uint8_t)((data18 >> 3) & 0x1); /* бит15: 0-ручной,1-авто (табл.15) */
-    out->brightness   = (uint8_t)((data18 >> 4) & 0xFF);
-    out->test_control = (uint8_t)((data18 >> 12) & 0x1);
-    out->matrix       = matrix;
-
-    uint32_t reserved = (data18 >> 13) & 0x1F; /* биты25-29 */
-    return (reserved == 0);
+    /* bits 9..12 reserve = 0; bits 13..28 = CRC-16; bit 29 sign = 0. */
+    uint32_t data = ((uint32_t)crc16 << 4);
+    ARINC_PackWord(ARINC_ADDR_SD4, data, matrix, ARINC_WORD_DK, out);
 }
 
-bool ARINC_ParseMsg7(const uint8_t word[4], Msg7_SelectLine *out)
+void ARINC_BuildSd5(uint8_t key_code,
+                    uint8_t key_id,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    uint8_t recipient; uint32_t data18; MatrixStatus matrix;
-    ARINC_UnpackWord(word, NULL, &recipient, &data18, &matrix);
+    uint32_t data = ((uint32_t)key_code) |
+                    ((uint32_t)key_id << 8);
 
-    out->recipient    = recipient;
-    out->sender       = (uint8_t)(data18 & 0x07);
-    out->active_line  = (LineId)((data18 >> 3) & 0x03);
-    out->matrix       = matrix;
-
-    uint32_t reserved = (data18 >> 5) & 0x1FFF; /* биты17-29 */
-    bool line_valid = (out->active_line == LINE_ID_LEFT) || (out->active_line == LINE_ID_RIGHT);
-    return (reserved == 0) && line_valid;
+    ARINC_PackWord(ARINC_ADDR_SD5, data, matrix, ARINC_WORD_K, out);
 }
 
-bool ARINC_ParseMsg8(const uint8_t word[4], Msg8_Ack *out)
+void ARINC_BuildSs2(uint8_t layout_rus,
+                    uint8_t sw_version,
+                    uint8_t backlight_ok,
+                    uint8_t keypad_ok,
+                    uint8_t illumination_ok,
+                    uint8_t power_ok,
+                    uint8_t arinc_ok,
+                    uint8_t ls1_ok,
+                    uint8_t ls2_ok,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
 {
-    uint8_t recipient; uint32_t data18; MatrixStatus matrix;
-    ARINC_UnpackWord(word, NULL, &recipient, &data18, &matrix);
+    uint32_t data = ((uint32_t)(layout_rus & 0x01u)) |
+                    ((uint32_t)sw_version << 1) |
+                    ((uint32_t)(backlight_ok & 0x01u) << 9) |
+                    ((uint32_t)(keypad_ok & 0x01u) << 10) |
+                    ((uint32_t)(illumination_ok & 0x01u) << 11) |
+                    ((uint32_t)(power_ok & 0x01u) << 12) |
+                    ((uint32_t)(arinc_ok & 0x01u) << 13) |
+                    ((uint32_t)(ls1_ok & 0x01u) << 14) |
+                    ((uint32_t)(ls2_ok & 0x01u) << 15);
 
-    out->recipient = recipient;
-    out->sender    = (uint8_t)(data18 & 0x07);
-    out->status    = (XferStatus)((data18 >> 3) & 0x03);
-    out->matrix    = matrix;
+    ARINC_PackWord(ARINC_ADDR_SS2, data, matrix, ARINC_WORD_K, out);
+}
 
-    uint32_t reserved = (data18 >> 5) & 0x1FFF; /* биты17-29 */
-    return (reserved == 0);
+void ARINC_BuildSd6(uint16_t voltage_3v3_centi_volt,
+                    uint16_t voltage_5v_centi_volt,
+                    ArincMatrix matrix,
+                    uint8_t out[4])
+{
+    uint32_t data = ((uint32_t)(voltage_3v3_centi_volt & 0x03FFu)) |
+                    ((uint32_t)(voltage_5v_centi_volt & 0x03FFu) << 10);
+
+    ARINC_PackWord(ARINC_ADDR_SD6, data, matrix, ARINC_WORD_K, out);
 }
